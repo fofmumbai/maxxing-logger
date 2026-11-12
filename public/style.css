@@ -1,0 +1,119 @@
+/* Mumbai Maxing — FoF Mumbai brand (fofmumbai.com/brand) */
+@font-face { font-family: "Figma Sans"; src: url("/fonts/Figma-Sans-Text-Regular.otf") format("opentype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Figma Sans"; src: url("/fonts/Figma-Sans-Text-Bold.otf") format("opentype"); font-weight: 700; font-display: swap; }
+
+:root {
+  /* Chapter colours */
+  --blue: #4D49FC;
+  --navy: #122F76;
+  --coral: #FF7676;
+  --green: #24CB71;
+  --lime: #E4FF97;
+  --orange: #FF7237;
+  --maroon: #721C1C;
+  /* Core colours */
+  --ink: #1E1E1E;
+  --white: #FFFFFF;
+  --paper: #F5F5F5;
+
+  --muted: #6b6b6b;
+  --line: #e4e4e4;
+  --radius: 16px;
+  --pill: 999px;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06);
+  --font: "Figma Sans", "Work Sans", system-ui, -apple-system, sans-serif;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; }
+body {
+  font-family: var(--font); color: var(--ink); background: var(--paper);
+  font-size: 16px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+img, video { max-width: 100%; display: block; }
+h1, h2, h3 { margin: 0; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+a { color: var(--blue); }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 0; border-radius: var(--pill); padding: 14px 22px; min-height: 48px;
+  background: var(--ink); color: var(--white); font-weight: 700; cursor: pointer;
+  transition: transform .08s ease, opacity .15s; text-decoration: none;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.blue { background: var(--blue); }
+.btn.green { background: var(--green); color: var(--ink); }
+.btn.coral { background: var(--coral); color: var(--ink); }
+.btn.lime { background: var(--lime); color: var(--ink); }
+.btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.btn.sm { padding: 8px 14px; min-height: 36px; font-size: 14px; }
+.btn.block { width: 100%; }
+
+/* Inputs */
+.field { display: grid; gap: 6px; }
+.field label { font-size: 13px; font-weight: 700; }
+.input, textarea.input, select.input {
+  width: 100%; border: 1.5px solid var(--line); background: var(--white);
+  border-radius: 14px; padding: 13px 16px; outline: none; min-height: 48px;
+}
+.input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(77,73,252,.18); }
+textarea.input { resize: vertical; min-height: 80px; }
+/* Custom dropdown arrow with breathing room (native arrows sit flush against the border). */
+select.input {
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  padding-right: 44px; text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%231E1E1E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 18px center; background-size: 12px 8px;
+}
+/* Horizontal scrollers (chips, tabs) fade at the edge so it's obvious there's more. */
+.scroll-x { display: flex; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.scroll-x::-webkit-scrollbar { display: none; }
+.fade-x { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.fade-x.at-end { -webkit-mask-image: none; mask-image: none; }
+
+/* Pills — echo the logo's pill shapes */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: var(--pill);
+  padding: 4px 12px; font-size: 13px; font-weight: 700; white-space: nowrap;
+}
+.pts { background: var(--blue); color: var(--white); }
+.st-todo { background: var(--white); color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); }
+.st-pending { background: #FFE6DA; color: #9a3a10; }
+.st-approved { background: #D3F5E2; color: #0d6b3a; }
+.st-rejected { background: #FFE0E0; color: var(--maroon); }
+
+/* Wordmark lockup (event name in brand pill style) */
+.lockup { display: inline-flex; align-items: stretch; font-weight: 400; letter-spacing: -0.02em; }
+.lockup span { padding: 6px 14px; line-height: 1; display: inline-flex; align-items: center; }
+.lockup .a { background: var(--ink); color: var(--white); border-radius: var(--pill) 0 0 var(--pill); }
+.lockup .b { background: var(--blue); color: var(--white); border-radius: 0 6px 6px 0; }
+
+.card { background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow); }
+
+/* Toasts */
+#toasts { position: fixed; left: 0; right: 0; top: calc(12px + var(--safe-t)); display: grid; gap: 8px; justify-items: center; z-index: 100; pointer-events: none; padding: 0 16px; }
+.toast {
+  pointer-events: auto; max-width: 480px; width: 100%; background: var(--ink); color: var(--white);
+  border-radius: 18px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  animation: tin .25s ease; display: grid; gap: 2px;
+}
+.toast.approved { background: var(--green); color: var(--ink); }
+.toast.rejected { background: var(--coral); color: var(--ink); }
+.toast b { font-size: 15px; }
+@keyframes tin { from { transform: translateY(-12px); opacity: 0; } }
+
+/* Lightbox */
+.lightbox { position: fixed; inset: 0; background: rgba(10,10,10,.92); z-index: 90; display: grid; place-items: center; padding: 16px; }
+.lightbox img, .lightbox video { max-height: 88vh; max-width: 100%; border-radius: 12px; }
+.lightbox .close { position: absolute; top: calc(12px + var(--safe-t)); right: 12px; }
+
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

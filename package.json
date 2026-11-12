@@ -1,0 +1,17 @@
+{
+  "name": "mumbai-maxing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mumbai Maxing task logger PWA - FoF Mumbai",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1"
+  }
+}

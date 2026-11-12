@@ -1,0 +1,56 @@
+# Push to main → this workflow installs the new version on the Google Cloud server.
+# It uses the same installer as manual updates (deploy/setup.sh), which keeps all data and settings
+# and rolls back automatically if the new version fails to start.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST        server IP, e.g. 34.47.220.29
+#   DEPLOY_SSH_KEY     private key of the "deploy" user on the server
+#   DEPLOY_KNOWN_HOSTS the server's SSH host key line(s), so the connection can't be intercepted
+# Repository variable (optional): DEPLOY_URL, e.g. https://mumbaimaxing.fofmumbai.com
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the code for syntax errors
+        run: |
+          for f in server.js db.js drive.js seed-tasks.js public/app.js public/admin.js public/sw.js; do node --check "$f"; done
+          bash -n deploy/setup.sh
+
+      - name: Build the bundle (tracked files only, so no secrets or data)
+        run: git archive --format=tar.gz --prefix=mumbaimaxing/ -o mumbaimaxing-deploy.tar.gz HEAD
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload and install on the server
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          scp -o BatchMode=yes mumbaimaxing-deploy.tar.gz deploy/setup.sh "deploy@$HOST:~/"
+          ssh -o BatchMode=yes "deploy@$HOST" 'sudo bash ~/setup.sh'
+
+      - name: Check the live site responds
+        env:
+          URL: ${{ vars.DEPLOY_URL || 'https://mumbaimaxing.fofmumbai.com' }}
+        run: curl -fsS --retry 6 --retry-delay 5 --retry-all-errors -o /dev/null "$URL/" && echo "Live: $URL"
