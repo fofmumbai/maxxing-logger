@@ -9,6 +9,7 @@ const store = {
 };
 const STATUS = { todo: 'Not started', pending: 'Needs review', approved: 'Approved', rejected: 'Rejected' };
 const AV = ['var(--lime)', 'var(--coral)', 'var(--green)', '#C9C8FF'];
+const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>';
 
 let token = store.get('mm_admin');
 let es = null;
@@ -97,8 +98,28 @@ async function loadSummary() {
 }
 
 // ---------- Shared: submission card ----------
+// Small dialog with labelled choices (clearer than OK/Cancel for destructive actions).
+// options: [{ label, value, kind: 'danger' | 'primary' | 'ghost' }] -> resolves to the chosen value, or null.
+function choose(title, body, options) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'dlg-scrim';
+    el.innerHTML = `<div class="dlg card" role="alertdialog" aria-modal="true" aria-label="${esc(title)}">
+      <h3>${esc(title)}</h3><p>${body}</p>
+      <div class="dlg-actions">${options.map((o, i) => `<button class="btn sm ${o.kind === 'danger' ? 'coral' : o.kind === 'primary' ? '' : 'ghost'}" data-i="${i}">${esc(o.label)}</button>`).join('')}
+      <button class="btn sm ghost" data-i="-1">Cancel</button></div></div>`;
+    const done = v => { el.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = e => { if (e.key === 'Escape') done(null); };
+    el.onclick = e => { const b = e.target.closest('[data-i]'); if (b) done(+b.dataset.i < 0 ? null : options[+b.dataset.i].value); else if (e.target === el) done(null); };
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(el);
+    el.querySelector('[data-i="-1"]').focus();
+  });
+}
+
 function mediaTile(m) {
   return `<div class="m" data-view="${esc(m.url)}" data-kind="${m.kind}" data-drive="${esc(m.driveUrl || '')}" title="${fmtSize(m.size)}">
+    <button class="del-file" data-del-file="${m.id}" aria-label="Delete this ${m.kind === 'video' ? 'video' : 'photo'}" title="Delete this file">${ICON_TRASH}</button>
     ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">▶ ${fmtSize(m.size)}</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
   </div>`;
 }
@@ -125,7 +146,10 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
           <button class="btn green" data-review="approved" data-id="${s.id}">Approve</button>
         </div>
       </div>
-      ${!pending && drafts[s.id] === undefined ? `<button class="btn ghost sm" data-change="${s.id}">Change decision</button>` : ''}
+      <div class="sub-foot">
+        ${!pending && drafts[s.id] === undefined ? `<button class="btn ghost sm" data-change="${s.id}">Change decision</button>` : '<span></span>'}
+        <button class="del-btn" data-del-sub="${s.id}" data-files="${s.media.length}" data-status="${s.status}" data-pts="${s.points ?? ''}">Delete submission</button>
+      </div>
     </article>`;
 }
 
@@ -207,7 +231,7 @@ async function viewTeam(id) {
         </div>
         <div>
           <div class="muted small" style="margin-bottom:6px">MEMBERS · ${members.length}/${maxMembers}</div>
-          ${members.map((m, i) => `<span class="mchip">${avatar(m.name, i)}${esc(m.name)}<button title="Remove member" data-kick="${m.id}" data-name="${esc(m.name)}">×</button></span>`).join('') || '<span class="muted">No one has joined yet.</span>'}
+          ${members.map((m, i) => `<span class="mchip">${avatar(m.name, i)}${esc(m.name)}<button class="kick" data-kick="${m.id}" data-name="${esc(m.name)}" data-subs="${submissions.filter(x => x.member_id === m.id).length}">Remove</button></span>`).join('') || '<span class="muted">No one has joined yet.</span>'}
         </div>
       </div>
       <div class="scorebox">
@@ -260,8 +284,17 @@ async function viewTeam(id) {
     await api(`/api/admin/teams/${id}/new-code`, { method: 'POST' }); viewTeam(id);
   };
   $$('[data-kick]').forEach(b => b.onclick = async () => {
-    if (!confirm(`Remove ${b.dataset.name} from the team? Their seat frees up; their past submissions stay.`)) return;
-    await api('/api/admin/members/' + b.dataset.kick, { method: 'DELETE' }); viewTeam(id);
+    const name = esc(b.dataset.name), n = +b.dataset.subs;
+    const choice = await choose(`Remove ${b.dataset.name}?`,
+      `${name} will be signed out and their seat frees up for someone else.` + (n ? `<br><br>They sent <b>${n} submission${n > 1 ? 's' : ''}</b>. Keep them for the team, or delete them with all their photos and videos (any points they earned are removed)?` : ''),
+      n ? [{ label: 'Remove, keep uploads', value: 'keep', kind: 'primary' }, { label: `Remove & delete ${n} submission${n > 1 ? 's' : ''}`, value: 'delete', kind: 'danger' }]
+        : [{ label: 'Remove', value: 'keep', kind: 'danger' }]);
+    if (!choice) return;
+    try {
+      const r = await api('/api/admin/members/' + b.dataset.kick + (choice === 'delete' ? '?withMedia=1' : ''), { method: 'DELETE' });
+      toast(`${b.dataset.name} removed`, choice === 'delete' ? `${r.deletedFiles} file${r.deletedFiles === 1 ? '' : 's'} deleted.` : '');
+      viewTeam(id);
+    } catch (err) { toast('Error', err.message, 'rejected'); }
   });
   $$('#ttFilter [data-f]').forEach(b => b.onclick = () => { teamTaskFilter = b.dataset.f; viewTeam(id); });
   $$('[data-toggle]').forEach(b => b.onclick = () => {
@@ -420,6 +453,30 @@ async function viewSettings() {
 // ---------- Review actions + lightbox (delegated) ----------
 document.addEventListener('input', e => { if (e.target.dataset.c) drafts[e.target.dataset.c] = e.target.value; });
 document.addEventListener('click', async e => {
+  const delFile = e.target.closest('[data-del-file]');
+  if (delFile) {
+    e.stopPropagation();
+    const card = delFile.closest('.sub');
+    const last = card && card.querySelectorAll('[data-del-file]').length === 1;
+    const ok = await choose('Delete this file?',
+      last ? "It's the only file in this submission, so <b>the whole submission will be deleted</b> (and any points it earned)." : 'The photo or video is removed from the dashboard and moved to the Google Drive trash. The rest of the submission stays.',
+      [{ label: last ? 'Delete submission' : 'Delete file', value: true, kind: 'danger' }]);
+    if (!ok) return;
+    try { await api('/api/admin/media/' + delFile.dataset.delFile, { method: 'DELETE' }); toast(last ? 'Submission deleted' : 'File deleted'); render(); }
+    catch (err) { toast('Error', err.message, 'rejected'); }
+    return;
+  }
+  const delSub = e.target.closest('[data-del-sub]');
+  if (delSub) {
+    const n = +delSub.dataset.files, approved = delSub.dataset.status === 'approved';
+    const ok = await choose('Delete this submission?',
+      `This deletes the submission and its <b>${n} file${n === 1 ? '' : 's'}</b> (moved to the Google Drive trash).` + (approved ? ` It was approved, so the team <b>loses ${esc(delSub.dataset.pts)} points</b>.` : '') + ' The team can submit this task again.',
+      [{ label: 'Delete submission', value: true, kind: 'danger' }]);
+    if (!ok) return;
+    try { await api('/api/admin/submissions/' + delSub.dataset.delSub, { method: 'DELETE' }); delete drafts[delSub.dataset.delSub]; toast('Submission deleted'); render(); }
+    catch (err) { toast('Error', err.message, 'rejected'); }
+    return;
+  }
   const v = e.target.closest('[data-view]');
   if (v) {
     const lb = document.createElement('div');

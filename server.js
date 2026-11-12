@@ -316,11 +316,58 @@ app.post('/api/admin/teams/:id/new-code', adminAuth, (req, res) => {
   db.prepare('UPDATE teams SET code = ? WHERE id = ?').run(uniqueCode(), req.params.id);
   res.json({ ok: true });
 });
+// Delete media files everywhere: local copy (if still here) and the Drive copy (moved to trash).
+function purgeMedia(rows) {
+  rows.forEach(m => { if (!m.local_deleted) fs.unlink(path.join(UPLOAD_DIR, m.filename), () => {}); });
+  drive.trash(rows.filter(m => m.drive_id).map(m => m.drive_id));
+}
+function deleteSubmissions(subIds) {
+  if (!subIds.length) return 0;
+  const q = subIds.map(() => '?').join(',');
+  const media = db.prepare(`SELECT * FROM media WHERE submission_id IN (${q})`).all(...subIds);
+  db.prepare(`DELETE FROM submissions WHERE id IN (${q})`).run(...subIds); // media rows cascade
+  purgeMedia(media);
+  return media.length;
+}
+
+// Remove a member. ?withMedia=1 also deletes every submission they sent (and its photos/videos).
 app.delete('/api/admin/members/:id', adminAuth, (req, res) => {
   const m = db.prepare('SELECT team_id FROM members WHERE id = ?').get(req.params.id);
-  db.prepare('DELETE FROM members WHERE id = ?').run(req.params.id);
-  if (m) toTeam(m.team_id, 'refresh', {});
-  res.json({ ok: true });
+  if (!m) return res.status(404).json({ error: 'Member not found' });
+  let files = 0;
+  db.transaction(() => {
+    if (req.query.withMedia === '1') {
+      files = deleteSubmissions(db.prepare('SELECT id FROM submissions WHERE member_id = ?').all(req.params.id).map(r => r.id));
+    }
+    const staged = db.prepare('SELECT * FROM uploads WHERE member_id = ?').all(req.params.id);
+    staged.forEach(u => fs.unlink(path.join(UPLOAD_DIR, u.filename), () => {}));
+    db.prepare('DELETE FROM members WHERE id = ?').run(req.params.id); // their session ends: next request asks them to rejoin
+  })();
+  toTeam(m.team_id, 'refresh', {});
+  toAdmins('reviewed', { teamId: m.team_id });
+  res.json({ ok: true, deletedFiles: files });
+});
+
+// Delete a whole submission with all its photos/videos. Points update automatically.
+app.delete('/api/admin/submissions/:id', adminAuth, (req, res) => {
+  const sub = db.prepare('SELECT team_id FROM submissions WHERE id = ?').get(req.params.id);
+  if (!sub) return res.status(404).json({ error: 'Submission not found' });
+  const files = deleteSubmissions([+req.params.id]);
+  toTeam(sub.team_id, 'refresh', {});
+  toAdmins('reviewed', { teamId: sub.team_id });
+  res.json({ ok: true, deletedFiles: files });
+});
+
+// Delete one photo/video. Deleting the last one removes the submission too.
+app.delete('/api/admin/media/:id', adminAuth, (req, res) => {
+  const m = db.prepare('SELECT media.*, s.team_id FROM media JOIN submissions s ON s.id = media.submission_id WHERE media.id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'File not found' });
+  const left = db.prepare('SELECT COUNT(*) n FROM media WHERE submission_id = ?').get(m.submission_id).n;
+  if (left <= 1) deleteSubmissions([m.submission_id]);
+  else { db.prepare('DELETE FROM media WHERE id = ?').run(m.id); purgeMedia([m]); }
+  toTeam(m.team_id, 'refresh', {});
+  toAdmins('reviewed', { teamId: m.team_id });
+  res.json({ ok: true, submissionDeleted: left <= 1 });
 });
 
 app.get('/api/admin/tasks', adminAuth, (req, res) => {

@@ -258,7 +258,9 @@ function work() {
     running++;
     uploadMedia(m)
       .then(id => {
-        db.prepare('UPDATE media SET drive_id = ?, drive_error = NULL WHERE id = ?').run(id, m.id);
+        const r = db.prepare('UPDATE media SET drive_id = ?, drive_error = NULL WHERE id = ?').run(id, m.id);
+        // Deleted by an organiser while it was uploading: don't leave an orphan copy in Drive.
+        if (!r.changes) { trash([id]); return; }
         if (!KEEP_LOCAL) {
           fs.unlink(path.join(UPLOAD_DIR, m.filename), () => {});
           db.prepare('UPDATE media SET local_deleted = 1 WHERE id = ?').run(m.id);
@@ -343,8 +345,18 @@ function info() {
   };
 }
 
+// Move files to the Drive trash (recoverable for 30 days) when organisers delete media.
+function trash(ids) {
+  if (!isReady() || !ids.length) return;
+  for (const id of ids) {
+    gapi(`/drive/v3/files/${id}?supportsAllDrives=true`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }),
+    }).catch(err => console.error(`Google Drive: could not trash ${id}: ${err.message}`));
+  }
+}
+
 module.exports = {
-  mode, isReady, start, kick, stream, info, retryFailed, onChange,
+  mode, isReady, start, kick, stream, info, retryFailed, onChange, trash,
   authUrl, completeAuth, disconnect,
   get enabled() { return isReady(); },
 };
