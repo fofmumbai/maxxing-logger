@@ -85,7 +85,7 @@ if [ $FIRST_RUN -eq 1 ]; then
   FALLBACK=${IP:+$(echo "$IP" | tr . -).sslip.io}
   echo
   echo "Which web address should the app use?"
-  echo "  • Your own subdomain, e.g. maxing.fofmumbai.com (its DNS A record must already point to ${IP:-this server})"
+  echo "  • Your own subdomain, e.g. mumbaimaxxing.fofmumbai.com (its DNS A record must already point to ${IP:-this server})"
   [ -n "$FALLBACK" ] && echo "  • Or press Enter to use a free address: $FALLBACK"
   read -rp "Domain: " DOMAIN
   DOMAIN=${DOMAIN:-$FALLBACK}

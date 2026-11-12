@@ -42,7 +42,7 @@ In <https://console.cloud.google.com/>, create (or pick) a project, then go to *
    ```
    http://localhost:3000/oauth/google/callback
    ```
-   After deploying, add a second one for your real address, for example `https://maxing.fofmumbai.com/oauth/google/callback`.
+   After deploying, add a second one for your real address, for example `https://mumbaimaxxing.fofmumbai.com/oauth/google/callback`.
 4. Click **Create**. In the popup, click **Download JSON**.
    **This file is secret.** Don't share it or commit it.
 

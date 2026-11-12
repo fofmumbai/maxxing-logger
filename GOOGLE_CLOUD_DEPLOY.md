@@ -1,6 +1,6 @@
 # Deploying Mumbai Maxxing on Google Cloud (free trial)
 
-The result is a small always‑on server in Google's **Mumbai** region, at `https://maxing.fofmumbai.com`, with automatic HTTPS.
+The result is a small always‑on server in Google's **Mumbai** region, at `https://mumbaimaxxing.fofmumbai.com`, with automatic HTTPS.
 It costs about **$15/month**, which comes out of the **$300 free trial credit**, so it's effectively free.
 
 You need: the `mumbai-maxing` Cloud project (already created), a card for the trial sign‑up, and access to fofmumbai.com's DNS on **Netlify**.
@@ -28,15 +28,15 @@ Open **https://console.cloud.google.com/compute/instancesAdd?project=mumbai-maxi
 
 Click **Create**. Write down the **External IP** shown in the VM list.
 
-## 3. Point `maxing.fofmumbai.com` at the server (Netlify DNS)
+## 3. Point `mumbaimaxxing.fofmumbai.com` at the server (Netlify DNS)
 1. Netlify → **Domains → fofmumbai.com → DNS settings → Add new record**.
-2. Record type **A** · Name **maxing** · Value **the External IP** · TTL default → **Save**.
-3. It's usually live within a few minutes. Check at <https://dnschecker.org/#A/maxing.fofmumbai.com>.
+2. Record type **A** · Name **mumbaimaxxing** · Value **the External IP** · TTL default → **Save**.
+3. It's usually live within a few minutes. Check at <https://dnschecker.org/#A/mumbaimaxxing.fofmumbai.com>.
 
 ## 4. Allow the new address for Google sign‑in
 Google Auth Platform → **Clients → Mumbai Maxxing server** → under **Authorized redirect URIs**, click **Add URI**:
 ```
-https://maxing.fofmumbai.com/oauth/google/callback
+https://mumbaimaxxing.fofmumbai.com/oauth/google/callback
 ```
 Keep the existing `http://localhost:3000/…` entry and **Save**.
 
@@ -52,13 +52,13 @@ Keep the existing `http://localhost:3000/…` entry and **Save**.
    ```bash
    sudo bash setup.sh
    ```
-   Enter `maxing.fofmumbai.com` as the domain, then choose a strong organiser password (you type it twice).
+   Enter `mumbaimaxxing.fofmumbai.com` as the domain, then choose a strong organiser password (you type it twice).
    It takes about 3 minutes and finishes with "✅ Mumbai Maxxing is installed".
 5. Delete `dist/google-oauth-client.json` from your Mac afterwards. The original stays in `secrets/`.
 
 ## 6. Connect Drive and test
-1. Open **https://maxing.fofmumbai.com/admin**, log in, then **Settings → Connect Google Drive** → hello.fofmumbai@gmail.com.
-2. On a phone, open **https://maxing.fofmumbai.com**, join a team, and submit a photo. Check that it shows up in the dashboard and in Drive.
+1. Open **https://mumbaimaxxing.fofmumbai.com/admin**, log in, then **Settings → Connect Google Drive** → hello.fofmumbai@gmail.com.
+2. On a phone, open **https://mumbaimaxxing.fofmumbai.com**, join a team, and submit a photo. Check that it shows up in the dashboard and in Drive.
 3. **Admin → Teams → Print room codes** prints the codes for the event.
 
 ---

@@ -6,7 +6,7 @@
 #   DEPLOY_HOST        server IP, e.g. 34.47.220.29
 #   DEPLOY_SSH_KEY     private key of the "deploy" user on the server
 #   DEPLOY_KNOWN_HOSTS the server's SSH host key line(s), so the connection can't be intercepted
-# Repository variable (optional): DEPLOY_URL, e.g. https://mumbaimaxing.fofmumbai.com
+# Repository variable (optional): DEPLOY_URL, e.g. https://mumbaimaxxing.fofmumbai.com
 
 name: Deploy
 
@@ -53,7 +53,7 @@ jobs:
 
       - name: Check the live site responds
         env:
-          URL: ${{ vars.DEPLOY_URL || 'https://mumbaimaxing.fofmumbai.com' }}
+          URL: ${{ vars.DEPLOY_URL || 'https://mumbaimaxxing.fofmumbai.com' }}
         run: |
           curl -fsS --retry 6 --retry-delay 5 --retry-all-errors -o /dev/null "$URL/"
           echo "Live at $URL"
