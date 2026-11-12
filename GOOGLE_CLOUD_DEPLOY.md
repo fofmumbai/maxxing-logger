@@ -64,8 +64,17 @@ Keep the existing `http://localhost:3000/…` entry and **Save**.
 ---
 
 ## Updating the app later
-Run `bash deploy/package.sh` on your Mac, upload just `mumbaimaxing-deploy.tar.gz` and `setup.sh` through the SSH window,
-then run `sudo bash setup.sh`. Data and settings are kept. If the new version fails to start, it rolls back automatically.
+**Automatic:** push to `main` on GitHub (`fofmumbai/maxxing-logger`). The **Deploy** workflow checks the code, uploads it,
+runs `deploy/setup.sh` on the server and confirms the site responds, in about 20 seconds. You can follow it under the repo's **Actions** tab.
+Data and settings are kept, and if the new version fails to start, the server rolls back automatically. Pushes that only change `.md` files don't deploy.
+You can also run it by hand: **Actions → Deploy → Run workflow**.
+
+It uses a dedicated `deploy` SSH user (public key added under the VM's **Edit → SSH Keys**) and three repo secrets:
+`DEPLOY_HOST`, `DEPLOY_SSH_KEY` (private key, kept locally in `secrets/deploy_key`) and `DEPLOY_KNOWN_HOSTS`.
+If the server's IP ever changes, update `DEPLOY_HOST` and `DEPLOY_KNOWN_HOSTS` (`ssh-keyscan <ip>`).
+
+**Manual fallback:** run `bash deploy/package.sh` on your Mac, upload `mumbaimaxing-deploy.tar.gz` and `setup.sh` through the SSH window,
+then run `sudo bash setup.sh`.
 
 ## Handy commands (in the SSH window)
 | What | Command |

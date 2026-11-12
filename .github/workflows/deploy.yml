@@ -13,6 +13,7 @@ name: Deploy
 on:
   push:
     branches: [main]
+    paths-ignore: ['**.md']   # docs-only changes don't need a deploy
   workflow_dispatch: {}
 
 concurrency:
