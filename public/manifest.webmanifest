@@ -1,7 +1,7 @@
 {
-  "name": "Mumbai Maxing — FoF Mumbai",
-  "short_name": "Mumbai Maxing",
-  "description": "Task logger for the Mumbai Maxing event by Friends of Figma Mumbai.",
+  "name": "Mumbai Maxxing — FoF Mumbai",
+  "short_name": "Mumbai Maxxing",
+  "description": "Task logger for the Mumbai Maxxing event by Friends of Figma Mumbai.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

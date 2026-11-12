@@ -1,4 +1,4 @@
-/* Mumbai Maxing — organiser dashboard */
+/* Mumbai Maxxing — organiser dashboard */
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -92,7 +92,7 @@ function render() {
 async function loadSummary() {
   const s = await api('/api/admin/summary');
   $('#pendingBadge').textContent = s.counts.pending || '';
-  document.title = (s.counts.pending ? `(${s.counts.pending}) ` : '') + 'Mumbai Maxing Admin';
+  document.title = (s.counts.pending ? `(${s.counts.pending}) ` : '') + 'Mumbai Maxxing Admin';
   return s;
 }
 
@@ -139,7 +139,7 @@ async function viewTeams() {
     teamSort === 'points' ? (a, b) => b.points - a.points || a.id - b.id
       : teamSort === 'pending' ? (a, b) => b.pending - a.pending || a.id - b.id
         : (a, b) => a.id - b.id);
-  $('#printSheet').innerHTML = d.teams.map(t => `<div class="pcard"><div>Mumbai Maxing · ${esc(t.name)}</div><b>${esc(t.code)}</b><div>Join at ${esc(location.origin)}</div></div>`).join('');
+  $('#printSheet').innerHTML = d.teams.map(t => `<div class="pcard"><div>Mumbai Maxxing · ${esc(t.name)}</div><b>${esc(t.code)}</b><div>Join at ${esc(location.origin)}</div></div>`).join('');
   paint(`
     <div class="toolbar">
       <h2>Teams</h2>
@@ -412,7 +412,7 @@ async function viewSettings() {
   $('#exportBtn').onclick = async () => {
     const r = await fetch('/api/admin/export.csv', { headers: { Authorization: 'Bearer ' + token } });
     const url = URL.createObjectURL(await r.blob());
-    Object.assign(document.createElement('a'), { href: url, download: 'mumbai-maxing-submissions.csv' }).click();
+    Object.assign(document.createElement('a'), { href: url, download: 'mumbai-maxxing-submissions.csv' }).click();
     URL.revokeObjectURL(url);
   };
 }

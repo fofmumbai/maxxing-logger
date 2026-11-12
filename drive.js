@@ -11,7 +11,7 @@
 //    GOOGLE_OAUTH_CLIENT_FILE   path to the OAuth client JSON downloaded from Cloud Console, or
 //    GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET
 //    Then click "Connect Google Drive" in Admin → Settings once. The app creates a
-//    "Mumbai Maxing 2026" folder (DRIVE_FOLDER_NAME) and can only see files it created (drive.file scope).
+//    "Mumbai Maxxing 2026" folder (DRIVE_FOLDER_NAME) and can only see files it created (drive.file scope).
 //    GOOGLE_OAUTH_REFRESH_TOKEN  optional: reuse a connection on another server without clicking Connect.
 //
 // B) Google Workspace Shared Drive with a service account.
@@ -29,7 +29,7 @@ const API = process.env.DRIVE_API_BASE || 'https://www.googleapis.com';
 const TOKEN_URL = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
 const AUTH_URL = process.env.GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
 const KEEP_LOCAL = process.env.DRIVE_KEEP_LOCAL === '1';
-const FOLDER_NAME = process.env.DRIVE_FOLDER_NAME || 'Mumbai Maxing 2026';
+const FOLDER_NAME = process.env.DRIVE_FOLDER_NAME || 'Mumbai Maxxing 2026';
 const PARALLEL = 2;
 const MAX_ATTEMPTS = 12;
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -225,7 +225,7 @@ async function uploadMedia(m) {
   const init = await gapi('/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': m.mime, 'X-Upload-Content-Length': String(size) },
-    body: JSON.stringify({ name, parents: [taskFolder], description: `Mumbai Maxing · ${info.team_name} · ${info.task_title} · submission ${info.sub_id}` }),
+    body: JSON.stringify({ name, parents: [taskFolder], description: `Mumbai Maxxing · ${info.team_name} · ${info.task_title} · submission ${info.sub_id}` }),
   });
   const session = init.headers.get('location');
   if (!session) throw new Error('Drive did not return an upload session');

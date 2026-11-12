@@ -1,4 +1,4 @@
-/* Mumbai Maxing — team app */
+/* Mumbai Maxxing — team app */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const store = {
@@ -413,7 +413,7 @@ async function startStream() {
   } catch (err) {
     const denied = err.name === 'NotAllowedError' || err.name === 'SecurityError';
     camMsg(denied
-      ? `<b>Allow camera access</b><span>Mumbai Maxing needs your camera${cam.mode === 'video' ? ' and microphone' : ''} to log tasks. Enable it in your browser's site settings, then try again.</span><button class="btn lime" id="camRetry">Try again</button>`
+      ? `<b>Allow camera access</b><span>Mumbai Maxxing needs your camera${cam.mode === 'video' ? ' and microphone' : ''} to log tasks. Enable it in your browser's site settings, then try again.</span><button class="btn lime" id="camRetry">Try again</button>`
       : `<b>Couldn't start the camera</b><span>${esc(err.message || err.name)}</span><button class="btn lime" id="camRetry">Try again</button>`);
     $('#camRetry').onclick = startStream;
   }

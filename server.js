@@ -391,7 +391,7 @@ app.get('/api/admin/export.csv', adminAuth, (req, res) => {
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const cols = ['team', 'task', 'points', 'status', 'comment', 'member', 'submitted_at', 'reviewed_at'];
   res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="mumbai-maxing-submissions.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="mumbai-maxxing-submissions.csv"');
   res.send([cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n'));
 });
 
@@ -410,7 +410,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 
 app.listen(PORT, () => {
-  console.log(`Mumbai Maxing running on http://localhost:${PORT}  (admin: /admin)`);
+  console.log(`Mumbai Maxxing running on http://localhost:${PORT}  (admin: /admin)`);
   drive.start();
 });
 

@@ -1,4 +1,4 @@
-# Mumbai Maxing — FoF Mumbai task logger (PWA)
+# Mumbai Maxxing — FoF Mumbai task logger (PWA)
 
 Teams join with a room code, capture photos/videos for tasks, and organisers approve or reject them live.
 

@@ -1,4 +1,4 @@
-# Deploying Mumbai Maxing on Google Cloud (free trial)
+# Deploying Mumbai Maxxing on Google Cloud (free trial)
 
 The result is a small always‑on server in Google's **Mumbai** region, at `https://maxing.fofmumbai.com`, with automatic HTTPS.
 It costs about **$15/month**, which comes out of the **$300 free trial credit**, so it's effectively free.
@@ -10,7 +10,7 @@ You need: the `mumbai-maxing` Cloud project (already created), a card for the tr
 ## 1. Activate the free trial
 1. In the Cloud console, click **Start free** on the "$300 in credit" banner (or go to **Billing**).
 2. Complete sign‑up (country: India, card details). Google doesn't charge automatically when the trial ends.
-3. Go to **Billing → My projects** and make sure **Mumbai Maxing** is linked to the new trial billing account.
+3. Go to **Billing → My projects** and make sure **Mumbai Maxxing** is linked to the new trial billing account.
    If it says "Billing is disabled", use **⋮ → Change billing** and pick the trial account.
 
 ## 2. Create the server (VM)
@@ -34,7 +34,7 @@ Click **Create**. Write down the **External IP** shown in the VM list.
 3. It's usually live within a few minutes. Check at <https://dnschecker.org/#A/maxing.fofmumbai.com>.
 
 ## 4. Allow the new address for Google sign‑in
-Google Auth Platform → **Clients → Mumbai Maxing server** → under **Authorized redirect URIs**, click **Add URI**:
+Google Auth Platform → **Clients → Mumbai Maxxing server** → under **Authorized redirect URIs**, click **Add URI**:
 ```
 https://maxing.fofmumbai.com/oauth/google/callback
 ```
@@ -53,7 +53,7 @@ Keep the existing `http://localhost:3000/…` entry and **Save**.
    sudo bash setup.sh
    ```
    Enter `maxing.fofmumbai.com` as the domain, then choose a strong organiser password (you type it twice).
-   It takes about 3 minutes and finishes with "✅ Mumbai Maxing is installed".
+   It takes about 3 minutes and finishes with "✅ Mumbai Maxxing is installed".
 5. Delete `dist/google-oauth-client.json` from your Mac afterwards. The original stays in `secrets/`.
 
 ## 6. Connect Drive and test

@@ -1,9 +1,9 @@
 # Connecting Google Drive
 
-Mumbai Maxing can save every submitted photo and video to Google Drive, sorted like this:
+Mumbai Maxxing can save every submitted photo and video to Google Drive, sorted like this:
 
 ```
-Mumbai Maxing 2026/
+Mumbai Maxxing 2026/
   Team 03/
     #12 Kerning crime/
       attempt-1_photo-1.jpg
@@ -28,7 +28,7 @@ In <https://console.cloud.google.com/>, create (or pick) a project, then go to *
 
 ### A2. OAuth consent screen
 1. Go to **APIs & Services → OAuth consent screen**. It may be labelled **Google Auth Platform**. Click **Get started**.
-2. **App name:** `Mumbai Maxing` · **User support email:** your Gmail, then **Next**.
+2. **App name:** `Mumbai Maxxing` · **User support email:** your Gmail, then **Next**.
 3. **Audience:** **External**, then **Next**.
 4. **Contact information:** your Gmail, then **Next**. Agree to the policy, then **Continue → Create**.
 5. Go to **Audience**. Under **Publishing status** click **Publish app → Confirm**, so the status says **In production**.
@@ -37,7 +37,7 @@ In <https://console.cloud.google.com/>, create (or pick) a project, then go to *
 
 ### A3. OAuth client
 1. Go to **Clients** (or **APIs & Services → Credentials**), then **+ Create client**.
-2. **Application type:** **Web application** · **Name:** `Mumbai Maxing server`.
+2. **Application type:** **Web application** · **Name:** `Mumbai Maxxing server`.
 3. Under **Authorized redirect URIs**, click **+ Add URI** and enter exactly:
    ```
    http://localhost:3000/oauth/google/callback
@@ -57,8 +57,8 @@ In <https://console.cloud.google.com/>, create (or pick) a project, then go to *
 ### A5. Connect
 1. Open **http://localhost:3000/admin** (it must be `localhost`, matching the redirect URI) → **Settings → Connect Google Drive**.
 2. Sign in with the Google account whose Drive should store the files, then click **Continue / Allow**.
-   - If Google shows **"Google hasn't verified this app"**, click **Advanced → Go to Mumbai Maxing (unsafe)**. It's your own app, so this is expected.
-3. You're sent back to Settings with **Connected**. A **Mumbai Maxing 2026** folder appears in your My Drive.
+   - If Google shows **"Google hasn't verified this app"**, click **Advanced → Go to Mumbai Maxxing (unsafe)**. It's your own app, so this is expected.
+3. You're sent back to Settings with **Connected**. A **Mumbai Maxxing 2026** folder appears in your My Drive.
    Share that folder with other organisers from Drive if they should browse it.
 
 ### On the hosting server

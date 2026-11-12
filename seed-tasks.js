@@ -43,7 +43,7 @@ module.exports = [
   ['Reflection shot', 'A creative reflection photo (puddle, glass, steel).', 20],
   ['Symmetry', 'The most perfectly symmetrical shot you can find.', 20],
   ['Color palette', 'Photo of a scene that has all 4 FoF accent colours.', 40],
-  ['Meet another team', 'Selfie with another Mumbai Maxing team.', 20],
+  ['Meet another team', 'Selfie with another Mumbai Maxxing team.', 20],
   ['Organiser spotted', 'Find an organiser and take a photo with them.', 15],
   ['Team cheer', 'Video of your team\'s original 10-second cheer.', 20],
   ['Shadow play', 'Make a shape or letter with your team\'s shadows.', 25],

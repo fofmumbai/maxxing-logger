@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mumbai Maxing: server setup and updates for Ubuntu 22.04 / 24.04 (Google Compute Engine).
+# Mumbai Maxxing: server setup and updates for Ubuntu 22.04 / 24.04 (Google Compute Engine).
 #
 # First run: installs Node.js + Caddy (automatic HTTPS), installs the app, asks for the domain and the
 #            admin password, and starts everything as a service that restarts on crash or reboot.
@@ -102,7 +102,7 @@ if [ $FIRST_RUN -eq 1 ]; then
   esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
   umask 077
   cat > "$ENV_FILE" <<EOF
-# Mumbai Maxing settings. Edit with: sudo nano $ENV_FILE  then: sudo systemctl restart $SERVICE
+# Mumbai Maxxing settings. Edit with: sudo nano $ENV_FILE  then: sudo systemctl restart $SERVICE
 NODE_ENV=production
 PORT=3000
 PUBLIC_URL=https://$DOMAIN
@@ -130,7 +130,7 @@ EOF
 
   cat > /etc/systemd/system/$SERVICE.service <<EOF
 [Unit]
-Description=Mumbai Maxing
+Description=Mumbai Maxxing
 After=network-online.target
 Wants=network-online.target
 
@@ -168,7 +168,7 @@ if curl -fs -o /dev/null http://127.0.0.1:3000/; then
   journalctl -u $SERVICE -n 5 --no-pager -o cat | sed 's/^/   /'
   cat <<EOF
 
-$( [ $FIRST_RUN -eq 1 ] && echo '✅ Mumbai Maxing is installed.' || echo '✅ Mumbai Maxing is updated. All data and settings were kept.' )
+$( [ $FIRST_RUN -eq 1 ] && echo '✅ Mumbai Maxxing is installed.' || echo '✅ Mumbai Maxxing is updated. All data and settings were kept.' )
 
    Team app:   https://$DOMAIN
    Organisers: https://$DOMAIN/admin
