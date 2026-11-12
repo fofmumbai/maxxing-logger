@@ -157,6 +157,12 @@
     .taskrow .save { display: none; }
     .taskrow.dirty .save { display: inline-flex; }
     .taskrow.dirty { background: #FAFAFF; }
+    .danger-ghost { background: transparent; color: var(--maroon); box-shadow: inset 0 0 0 1.5px var(--coral); }
+    .danger-ghost:hover { background: #FFE0E0; }
+    .danger-ghost svg, .card-del svg { width: 15px; height: 15px; }
+    .foot-r { display: inline-flex; align-items: center; gap: 6px; }
+    .card-del { width: 30px; height: 30px; border-radius: 50%; border: 0; background: transparent; color: #b3b3b3; display: grid; place-items: center; cursor: pointer; }
+    .card-del:hover, .card-del:focus-visible { background: #FFE0E0; color: var(--maroon); }
     .del-btn { border: 0; background: none; color: var(--muted); font-weight: 700; font-size: 13px; cursor: pointer; padding: 8px; border-radius: 8px; }
     .del-btn:hover { color: var(--maroon); background: #FFE0E0; }
     @media (max-width: 760px) {

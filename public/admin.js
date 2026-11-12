@@ -173,6 +173,22 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
     </article>`;
 }
 
+// Confirm, then delete a team. Fetches fresh counts so the warning is accurate wherever it's triggered from.
+async function confirmDeleteTeam(id) {
+  let d;
+  try { d = await api('/api/admin/teams/' + id); } catch (err) { toast('Error', err.message, 'rejected'); return false; }
+  const { team, members, submissions } = d;
+  const files = submissions.reduce((a, s) => a + s.media.length, 0);
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const ok = await choose(`Delete ${team.name}?`,
+    `This permanently deletes the team and its room code <b>${esc(team.code)}</b>, signs out <b>${plural(members.length, 'member')}</b>, and deletes <b>${plural(submissions.length, 'submission')}</b> with <b>${plural(files, 'file')}</b> (moved to the Google Drive trash).` +
+    (team.points ? ` Its <b>${team.points} points</b> leave the leaderboard.` : '') + ` This can't be undone.`,
+    [{ label: 'Delete team', value: true, kind: 'danger' }]);
+  if (!ok) return false;
+  try { await api('/api/admin/teams/' + id, { method: 'DELETE' }); toast(`${team.name} deleted`); return true; }
+  catch (err) { toast('Error', err.message, 'rejected'); return false; }
+}
+
 // ---------- Teams home ----------
 async function viewTeams() {
   const d = await api('/api/admin/teams');
@@ -209,11 +225,16 @@ async function viewTeams() {
         </div>
         <div class="foot">
           <div class="avs">${t.members.map((m, i) => avatar(m.name, i)).join('')}${Array.from({ length: Math.max(0, d.maxMembers - t.members.length) }, () => '<span class="av av-empty">+</span>').join('')}</div>
-          <span class="muted small">${t.members.length}/${d.maxMembers} joined</span>
+          <span class="foot-r"><span class="muted small">${t.members.length}/${d.maxMembers} joined</span>
+            <button class="card-del" data-del-team="${t.id}" aria-label="Delete ${esc(t.name)}" title="Delete team">${ICON_TRASH}</button></span>
         </div>
       </a>`).join('')}
     </div>`);
   $('#teamSort').onchange = e => { teamSort = e.target.value; store.set('mm_sort', teamSort); viewTeams(); };
+  $$('[data-del-team]').forEach(b => b.onclick = async e => {
+    e.preventDefault(); e.stopPropagation(); // the card itself is a link to the team page
+    if (await confirmDeleteTeam(+b.dataset.delTeam)) viewTeams();
+  });
   $('#addTeam').onclick = async () => {
     const name = prompt('Team name', '');
     if (name === null) return;
@@ -248,7 +269,7 @@ async function viewTeam(id) {
           <span class="muted small">ROOM CODE</span><b>${esc(team.code)}</b>
           <button class="btn ghost sm" id="copyLink">Copy join link</button>
           <button class="btn ghost sm" id="newCode">New code</button>
-          <button class="del-btn" id="deleteTeam">Delete team</button>
+          <button class="btn sm danger-ghost" id="deleteTeam">${ICON_TRASH} Delete team</button>
         </div>
         <div>
           <div class="muted small" style="margin-bottom:6px">MEMBERS · ${members.length}/${maxMembers}</div>
@@ -305,15 +326,7 @@ async function viewTeam(id) {
       [{ label: 'Generate new code', value: true, kind: 'primary' }])) return;
     await api(`/api/admin/teams/${id}/new-code`, { method: 'POST' }); viewTeam(id);
   };
-  $('#deleteTeam').onclick = async () => {
-    const files = submissions.reduce((a, s) => a + s.media.length, 0);
-    const ok = await choose(`Delete ${team.name}?`,
-      `This permanently deletes the team, signs out its <b>${members.length} member${members.length === 1 ? '' : 's'}</b>, and deletes its <b>${submissions.length} submission${submissions.length === 1 ? '' : 's'}</b> with <b>${files} photo${files === 1 ? '' : 's'}/video${files === 1 ? '' : 's'}</b> (moved to the Google Drive trash). Its <b>${team.points} points</b> leave the leaderboard. This can't be undone.`,
-      [{ label: 'Delete team', value: true, kind: 'danger' }]);
-    if (!ok) return;
-    try { await api('/api/admin/teams/' + id, { method: 'DELETE' }); toast(`${team.name} deleted`); location.hash = '#/teams'; }
-    catch (err) { toast('Error', err.message, 'rejected'); }
-  };
+  $('#deleteTeam').onclick = async () => { if (await confirmDeleteTeam(id)) location.hash = '#/teams'; };
   $$('[data-kick]').forEach(b => b.onclick = async () => {
     const name = esc(b.dataset.name), n = +b.dataset.subs;
     const choice = await choose(`Remove ${b.dataset.name}?`,
