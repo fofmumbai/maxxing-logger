@@ -160,7 +160,6 @@ function renderUpdates() {
 
 function renderTeam() {
   const { team, members, maxMembers, me } = state;
-  const notifOk = 'Notification' in window && Notification.permission === 'granted';
   $('#teamView').innerHTML = `
     <div class="card codebox"><span class="small" style="opacity:.7">ROOM CODE</span><b>${esc(team.code)}</b><span class="small" style="opacity:.7">${members.length}/${maxMembers} members joined</span></div>
     <div class="card">${members.map((m, i) => `
@@ -171,9 +170,9 @@ function renderTeam() {
       <b>${team.points} points · ${team.approved}/${state.tasks.length} tasks approved</b>
       <span class="muted small">${team.pending} waiting for review</span>
     </div>
-    ${'Notification' in window && !notifOk ? `<button class="btn lime block" id="notifBtn">Turn on review alerts</button>` : ''}
+    <button class="card perm-link" id="permLink"><span>📷 📍 🔔</span><b>Phone permissions</b><span class="muted small">Camera, location, alerts →</span></button>
     <button class="linkbtn" id="leaveBtn">Sign out on this device</button>`;
-  $('#notifBtn') && ($('#notifBtn').onclick = async () => { await Notification.requestPermission(); renderTeam(); });
+  $('#permLink').onclick = openPerms;
   $('#leaveBtn').onclick = async () => { if (await confirmBox('Sign out on this device?', 'You can rejoin any time with the same room code and <b>the same name</b>.', 'Sign out')) logout(); };
 }
 
@@ -679,6 +678,103 @@ function connect() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) { load(); if (!es || es.readyState === 2) connect(); } });
 
+// ---------- Permission setup (shown right after joining) ----------
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const perm = { cam: 'unknown', geo: 'unknown', notif: 'unknown' };
+
+async function queryPerm(name) {
+  try { return (await navigator.permissions.query({ name })).state; } catch { return 'unknown'; } // granted | denied | prompt
+}
+async function refreshPerms() {
+  const [c, m, g] = await Promise.all([queryPerm('camera'), queryPerm('microphone'), queryPerm('geolocation')]);
+  if (c !== 'unknown') perm.cam = c === 'granted' && m !== 'denied' ? (m === 'granted' || m === 'unknown' ? 'granted' : 'prompt') : c;
+  if (g !== 'unknown') perm.geo = g;
+  perm.notif = !('Notification' in window) ? 'unsupported' : Notification.permission === 'default' ? 'prompt' : Notification.permission;
+}
+
+function askCamera() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.isSecureContext) { perm.cam = 'unsupported'; return Promise.resolve(); }
+  return navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then(s => { s.getTracks().forEach(t => t.stop()); perm.cam = 'granted'; })
+    .catch(e => { perm.cam = e.name === 'NotAllowedError' || e.name === 'SecurityError' ? 'denied' : 'error'; });
+}
+function askLocation() {
+  if (!('geolocation' in navigator)) { perm.geo = 'unsupported'; return Promise.resolve(); }
+  return new Promise(resolve => navigator.geolocation.getCurrentPosition(
+    () => { perm.geo = 'granted'; resolve(); },
+    e => { perm.geo = e.code === 1 ? 'denied' : 'granted-weak'; resolve(); }, // timeout/no fix: allowed, just no signal yet
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }));
+}
+async function askNotifications() {
+  if (!('Notification' in window)) { perm.notif = 'unsupported'; return; }
+  try { perm.notif = await Notification.requestPermission(); } catch { perm.notif = Notification.permission; }
+}
+
+const FIX = {
+  cam: IS_IOS
+    ? 'iPhone: open <b>Settings → Safari → Camera</b> and <b>Microphone</b> → <b>Allow</b> (or tap <b>aA</b> in the address bar → Website Settings), then tap Check again.'
+    : 'Tap the icon left of the address bar → <b>Permissions</b> → turn on <b>Camera</b> and <b>Microphone</b>, then tap Check again.',
+  geo: IS_IOS
+    ? 'iPhone: <b>Settings → Privacy & Security → Location Services</b> (on) → <b>Safari Websites → While Using</b>. Then tap Check again.'
+    : 'Tap the icon left of the address bar → <b>Permissions</b> → <b>Location → Allow</b>. Make sure location is on in your phone settings too.',
+  notif: IS_IOS
+    ? 'On iPhone, alerts only work after <b>Share → Add to Home Screen</b>, opening the app from there. Optional: you\'ll still see updates inside the app.'
+    : 'Tap the icon left of the address bar → <b>Permissions → Notifications → Allow</b>. Optional.',
+};
+
+function permRow(key, title, why, required) {
+  const s = perm[key];
+  const ok = s === 'granted' || s === 'granted-weak';
+  const bad = s === 'denied' || s === 'error';
+  const na = s === 'unsupported';
+  const badge = ok ? '<span class="pr-st ok">✓ Allowed</span>' : bad ? '<span class="pr-st bad">✕ Blocked</span>' : na ? '<span class="pr-st na">Not available</span>' : `<span class="pr-st todo">${required ? 'Needed' : 'Optional'}</span>`;
+  const help = bad || (na && key === 'notif') ? `<div class="pr-help">${FIX[key]}</div>` : s === 'granted-weak' ? '<div class="pr-help">Allowed. GPS signal is weak here, but it will lock on outdoors.</div>' : '';
+  return `<div class="pr ${ok ? 'ok' : bad ? 'bad' : ''}"><div class="pr-ic">${{ cam: '📷', geo: '📍', notif: '🔔' }[key]}</div>
+    <div class="pr-body"><div class="pr-top"><b>${title}</b>${badge}</div><div class="muted small">${why}</div>${help}</div></div>`;
+}
+
+function renderPerms() {
+  const camOk = perm.cam === 'granted';
+  const allDone = ['cam', 'geo', 'notif'].every(k => perm[k] !== 'prompt' && perm[k] !== 'unknown');
+  $('#perms').innerHTML = `
+    <div class="pr-hero"><h1>Get your phone <span class="hl">ready</span></h1>
+      <p class="muted">Allow these once now, so nothing interrupts you mid-task.</p></div>
+    <div class="card pr-list">
+      ${permRow('cam', 'Camera & microphone', 'To take photos and record videos for tasks.', true)}
+      ${permRow('geo', 'Location', 'Proves where each photo was taken. Organisers may reject submissions without it.', true)}
+      ${permRow('notif', 'Notifications', 'Get alerted when organisers approve or reject.', false)}
+    </div>
+    <button class="btn blue block" id="permAllow">${allDone ? 'Check again' : 'Allow all'}</button>
+    <button class="btn ${camOk ? '' : 'ghost'} block" id="permDone">${camOk ? "Let's go →" : 'Skip for now'}</button>
+    <p class="muted small" style="text-align:center; margin:0">Your phone will show its own pop-ups. Tap <b>Allow</b> on each.</p>`;
+  $('#permAllow').onclick = async e => {
+    e.target.disabled = true; e.target.textContent = 'Waiting for your phone…';
+    if (perm.cam !== 'granted') await askCamera();
+    if (perm.geo !== 'granted' && perm.geo !== 'granted-weak') await askLocation();
+    if (perm.notif === 'prompt' || perm.notif === 'unknown') await askNotifications();
+    await refreshPerms().catch(() => {});
+    renderPerms();
+  };
+  $('#permDone').onclick = async () => {
+    if (!camOk && !await confirmBox('Skip camera setup?', "You won't be able to complete tasks until camera access is allowed. You can come back to this from the <b>Team</b> tab.", 'Skip')) return;
+    store.set('mm_perms_' + (state?.me.id || ''), '1');
+    closePerms();
+  };
+}
+
+async function openPerms() {
+  await refreshPerms();
+  $('#perms').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+  window.scrollTo(0, 0);
+  renderPerms();
+}
+function closePerms() {
+  $('#perms').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  renderTeam();
+}
+
 async function load() {
   try { state = await api('/api/me'); render(); } catch (e) { if (token) toast('Couldn\'t refresh', e.message); }
 }
@@ -690,5 +786,7 @@ async function boot() {
   $('#join').classList.add('hidden');
   $('#app').classList.remove('hidden');
   connect();
+  // First time on this device: walk through permissions before the task list.
+  if (!store.get('mm_perms_' + state.me.id)) openPerms();
 }
 boot();

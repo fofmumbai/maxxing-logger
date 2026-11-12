@@ -108,6 +108,28 @@
     .thumb .ok { position: absolute; right: 6px; bottom: 6px; width: 26px; height: 26px; border-radius: 50%; background: var(--green); color: var(--ink); font-weight: 700; display: grid; place-items: center; font-size: 14px; z-index: 2; animation: pop .3s ease; }
     @keyframes pop { from { transform: scale(0); } 70% { transform: scale(1.2); } }
 
+    /* Permission setup */
+    #perms { min-height: 100dvh; display: grid; align-content: center; gap: 16px; padding: calc(24px + var(--safe-t)) 16px calc(24px + var(--safe-b)); }
+    .pr-hero h1 { font-size: clamp(32px, 9vw, 44px); }
+    .pr-hero .hl { background: var(--lime); border-radius: var(--pill); padding: 0 .2em; }
+    .pr-hero p { margin: 10px 0 0; }
+    .pr-list { padding: 6px 16px; }
+    .pr { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .pr:last-child { border-bottom: 0; }
+    .pr-ic { width: 44px; height: 44px; border-radius: 14px; background: var(--paper); display: grid; place-items: center; font-size: 22px; flex: none; }
+    .pr.ok .pr-ic { background: #D3F5E2; }
+    .pr.bad .pr-ic { background: #FFE0E0; }
+    .pr-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+    .pr-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .pr-st { font-size: 12px; font-weight: 700; border-radius: var(--pill); padding: 3px 9px; white-space: nowrap; }
+    .pr-st.ok { background: #D3F5E2; color: #0d6b3a; }
+    .pr-st.bad { background: #FFE0E0; color: var(--maroon); }
+    .pr-st.todo { background: var(--paper); color: var(--muted); }
+    .pr-st.na { background: var(--paper); color: var(--muted); }
+    .pr-help { font-size: 13px; background: #FFF4EC; color: #6b2f0c; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
+    .perm-link { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; align-items: center; padding: 14px 16px; border: 0; text-align: left; cursor: pointer; width: 100%; }
+    .perm-link > span:first-child { grid-row: span 2; font-size: 18px; }
+
     /* Confirmation popup */
     .dlg-scrim { position: fixed; inset: 0; z-index: 85; background: rgba(0,0,0,.5); display: grid; place-items: center; padding: 20px; animation: fade .15s; }
     .dlg { background: var(--white); border-radius: 24px; padding: 22px; max-width: 380px; width: 100%; display: grid; gap: 10px; animation: up .2s ease; }
@@ -224,6 +246,9 @@
     </form>
     <p class="muted small" style="text-align:center; margin:0">Friends of Figma Mumbai · Creativity. Collaboration. Continuous Learning.</p>
   </section>
+
+  <!-- PERMISSIONS -->
+  <section id="perms" class="wrap hidden"></section>
 
   <!-- APP -->
   <section id="app" class="hidden">
