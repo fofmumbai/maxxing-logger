@@ -117,8 +117,27 @@ function choose(title, body, options) {
   });
 }
 
+// ---------- Capture details (time + GPS) ----------
+const IST = { timeZone: 'Asia/Kolkata' };
+const fmtTime = ms => new Date(ms).toLocaleTimeString('en-IN', { ...IST, hour: 'numeric', minute: '2-digit' });
+const fmtDateTime = ms => new Date(ms).toLocaleString('en-IN', { ...IST, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', second: '2-digit' }) + ' IST';
+const mapsUrl = m => `https://www.google.com/maps/search/?api=1&query=${m.lat},${m.lng}`;
+const coords = m => `${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}`;
+
+// One line per submission: where/when the first located file was taken, or a warning if none were.
+function captureLine(s) {
+  const located = s.media.filter(m => m.lat != null);
+  const first = located[0];
+  const taken = s.media.find(m => m.capturedAt)?.capturedAt;
+  if (!first) return `<div class="cap none">📍 No location shared${taken ? ` · taken ${fmtTime(taken)} IST` : ''}</div>`;
+  const partial = located.length < s.media.length ? ` · ${located.length}/${s.media.length} files located` : '';
+  return `<div class="cap">📍 <a href="${mapsUrl(first)}" target="_blank" rel="noopener">${coords(first)}</a> <span class="muted">±${Math.round(first.accuracy || 0)} m${taken ? ` · taken ${fmtTime(taken)} IST` : ''}${partial}</span></div>`;
+}
+
 function mediaTile(m) {
-  return `<div class="m" data-view="${esc(m.url)}" data-kind="${m.kind}" data-drive="${esc(m.driveUrl || '')}" title="${fmtSize(m.size)}">
+  const cap = JSON.stringify({ t: m.capturedAt || null, u: m.uploadedAt || null, lat: m.lat, lng: m.lng, acc: m.accuracy });
+  return `<div class="m" data-view="${esc(m.url)}" data-kind="${m.kind}" data-drive="${esc(m.driveUrl || '')}" data-cap="${esc(cap)}" title="${fmtSize(m.size)}">
+    ${m.lat != null ? '<span class="pin" title="Has location">📍</span>' : ''}
     <button class="del-file" data-del-file="${m.id}" aria-label="Delete this ${m.kind === 'video' ? 'video' : 'photo'}" title="Delete this file">${ICON_TRASH}</button>
     ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">▶ ${fmtSize(m.size)}</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
   </div>`;
@@ -137,6 +156,7 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
         ${showTask ? `<span class="pill pts">+${s.points}</span>` : `<span class="pill st-${s.status}">${STATUS[s.status]}</span>`}
       </div>
       <div class="media">${s.media.map(mediaTile).join('')}</div>
+      ${captureLine(s)}
       ${s.note ? `<div class="note"><b>Team note:</b> ${esc(s.note)}</div>` : ''}
       ${!pending ? `<div class="reviewed ${s.status}"><b>${s.status === 'approved' ? 'Approved' : 'Rejected'}</b> ${ago(s.reviewed_at)}${s.comment ? ` · “${esc(s.comment)}”` : ''}</div>` : ''}
       <div class="rv ${pending || drafts[s.id] !== undefined ? '' : 'hidden'}" style="display:grid; gap:8px">
@@ -498,9 +518,19 @@ document.addEventListener('click', async e => {
   if (v) {
     const lb = document.createElement('div');
     lb.className = 'lightbox';
-    lb.innerHTML = (v.dataset.kind === 'video' ? `<video src="${esc(v.dataset.view)}" controls autoplay playsinline></video>` : `<img src="${esc(v.dataset.view)}" alt="">`)
+    let cap = {};
+    try { cap = JSON.parse(v.dataset.cap || '{}'); } catch {}
+    const info = [
+      cap.t ? `<span>🕒 Taken ${fmtDateTime(cap.t)}</span>` : '<span>🕒 Capture time unknown</span>',
+      cap.lat != null
+        ? `<span>📍 ${coords(cap)} · ±${Math.round(cap.acc || 0)} m · <a href="${mapsUrl(cap)}" target="_blank" rel="noopener">Open in Google Maps</a></span>`
+        : '<span>📍 No location shared</span>',
+      cap.u ? `<span class="muted">Uploaded ${fmtDateTime(cap.u)}</span>` : '',
+    ].join('');
+    lb.innerHTML = `<div class="lb-cap">${info}</div>` + (v.dataset.kind === 'video' ? `<video src="${esc(v.dataset.view)}" controls autoplay playsinline></video>` : `<img src="${esc(v.dataset.view)}" alt="">`)
       + `<div class="close" style="display:flex; gap:8px">${v.dataset.drive ? `<a class="btn sm" style="background:var(--white); color:var(--ink)" href="${esc(v.dataset.drive)}" target="_blank" rel="noopener">Open in Drive</a>` : ''}<a class="btn sm lime" href="${esc(v.dataset.view)}" download>Download</a><button class="btn sm">Close</button></div>`;
     lb.onclick = ev => { if (ev.target === lb || ev.target.tagName === 'BUTTON') lb.remove(); };
+    lb.style.gridTemplateRows = 'auto 1fr';
     document.body.appendChild(lb);
     return;
   }

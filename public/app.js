@@ -246,6 +246,10 @@ function uploadItem(d) {
   d.state = 'uploading'; d.progress = 0; d.error = '';
   paintItem(d);
   const fd = new FormData();
+  // Capture details go before the file so the server has them when the upload lands.
+  const m = d.meta || {};
+  fd.append('captured_at', m.capturedAt ?? '');
+  if (m.lat != null) { fd.append('lat', m.lat); fd.append('lng', m.lng); fd.append('accuracy', m.acc ?? ''); }
   fd.append('media', d.file, d.file.name);
   const xhr = d.xhr = new XMLHttpRequest();
   xhr.open('POST', '/api/uploads');
@@ -330,7 +334,7 @@ function renderSheet() {
         </div>
         ${draft.length ? `<div class="thumbs">${draft.map(d => `
           <div class="thumb" data-key="${d.key}">${d.kind === 'video' ? `<video src="${d.url}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${d.url}" alt="">`}
-          <span class="tag">${d.kind === 'video' ? `▶ ${fmtDur(d.duration || 0)} · ` : ''}${fmtMB(d.file.size)}</span>
+          <span class="tag">${d.meta?.lat != null ? '📍 ' : ''}${d.kind === 'video' ? `▶ ${fmtDur(d.duration || 0)} · ` : ''}${fmtMB(d.file.size)}</span>
           <div class="ov">${overlayHtml(d)}</div>
           <button class="x" data-rm="${d.key}" aria-label="Remove">×</button></div>`).join('')}</div>`
           : `<p class="muted small" style="margin:0">Camera only: capture photos and videos live. Add as many as you need, then send.</p>`}
@@ -388,7 +392,38 @@ function renderSheet() {
 // Everything is captured live from getUserMedia. There is no <input type=file>,
 // so on every device there is no way to pick from the gallery.
 const MAX_VIDEO_SEC = 120;
-const cam = { stream: null, mode: 'photo', facing: 'environment', recorder: null, chunks: [], timer: null, started: 0 };
+const cam = { stream: null, mode: 'photo', facing: 'environment', recorder: null, chunks: [], timer: null, started: 0, startMeta: null };
+
+// ---------- Location (where + when each capture was taken) ----------
+// GPS is watched only while the camera is open. Captures still work without it; organisers then see "No location".
+const GEO_MAX_AGE = 5 * 60 * 1000; // a fix older than this isn't attached
+const geo = { watch: null, last: null, status: 'idle' };
+
+function startGeo() {
+  if (!('geolocation' in navigator)) { geo.status = 'unavailable'; return updateGeoPill(); }
+  if (geo.watch != null) return;
+  if (!geo.last) { geo.status = 'finding'; updateGeoPill(); }
+  geo.watch = navigator.geolocation.watchPosition(
+    p => { geo.last = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() }; geo.status = 'on'; updateGeoPill(); },
+    err => { geo.status = err.code === 1 ? 'denied' : (geo.last ? 'on' : 'weak'); updateGeoPill(); },
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+}
+function stopGeo() {
+  if (geo.watch != null) { navigator.geolocation.clearWatch(geo.watch); geo.watch = null; }
+}
+function captureMeta() {
+  const l = geo.last && Date.now() - geo.last.at < GEO_MAX_AGE ? geo.last : null;
+  return { capturedAt: Date.now(), lat: l?.lat ?? null, lng: l?.lng ?? null, acc: l?.acc ?? null };
+}
+function updateGeoPill() {
+  const el = $('#geoPill');
+  if (!el) return;
+  const fresh = geo.last && Date.now() - geo.last.at < GEO_MAX_AGE;
+  const st = geo.status === 'on' && fresh ? 'on' : geo.status === 'on' ? 'weak' : geo.status;
+  el.className = 'geo-pill ' + st;
+  el.textContent = { on: `📍 Location on · ±${Math.round(geo.last?.acc || 0)} m`, finding: '📍 Finding location…', weak: '📍 Weak GPS signal…', denied: '📍 Location off', unavailable: '📍 No location on this device', idle: '' }[st] || '';
+}
+
 
 function capture(mode) {
   if (draft.length >= MAX_ITEMS) return toast(`Max ${MAX_ITEMS} items per submission`);
@@ -397,6 +432,7 @@ function capture(mode) {
   document.body.style.overflow = 'hidden';
   updateCamUi();
   startStream();
+  startGeo();
 }
 
 function camMsg(html) {
@@ -439,6 +475,7 @@ function stopStream() {
 function closeCam() {
   if (cam.recorder?.state === 'recording') stopRecording();
   stopStream();
+  stopGeo();
   $('#cam').classList.add('hidden');
   renderSheet();
 }
@@ -456,9 +493,9 @@ function updateCamUi() {
   $('#camLast').innerHTML = last ? `<span class="media">${last.kind === 'video' ? `<video src="${last.url}#t=0.1" muted playsinline></video>` : `<img src="${last.url}" alt="">`}</span><b>${draft.length}</b>` : '';
 }
 
-function addCapture(blob, kind, ext, duration = 0) {
+function addCapture(blob, kind, ext, duration = 0, meta = captureMeta()) {
   const file = new File([blob], `${kind}-${Date.now()}.${ext}`, { type: blob.type, lastModified: Date.now() });
-  draft.push({ key: ++keySeq, file, url: URL.createObjectURL(file), kind, duration, state: 'queued', progress: 0 });
+  draft.push({ key: ++keySeq, file, url: URL.createObjectURL(file), kind, duration, meta, state: 'queued', progress: 0 });
   pump();
   navigator.vibrate?.(30);
   updateCamUi();
@@ -514,12 +551,13 @@ function startRecording() {
   cam.recorder.onstop = () => {
     const mime = (cam.recorder.mimeType || type || 'video/webm').split(';')[0];
     const blob = new Blob(cam.chunks, { type: mime });
-    if (blob.size) addCapture(blob, 'video', mime.includes('mp4') ? 'mp4' : 'webm', (Date.now() - cam.started) / 1000);
+    if (blob.size) addCapture(blob, 'video', mime.includes('mp4') ? 'mp4' : 'webm', (Date.now() - cam.started) / 1000, cam.startMeta || captureMeta());
     updateCamUi();
     if ($('#cam').classList.contains('hidden')) renderSheet();
   };
   cam.recorder.start(1000);
   cam.started = Date.now();
+  cam.startMeta = captureMeta();
   $('#camTime').textContent = '0:00';
   cam.timer = setInterval(() => {
     const s = Math.floor((Date.now() - cam.started) / 1000);
@@ -541,6 +579,9 @@ $('#camShutter').onclick = () => {
   if (cam.recorder?.state === 'recording') stopRecording(); else startRecording();
 };
 $('#camClose').onclick = closeCam;
+$('#geoPill').onclick = () => {
+  if (geo.status === 'denied') toast('Location is off', 'Allow location for this site in your browser settings so organisers can see where photos were taken. You can still submit without it.');
+};
 $('#camDone').onclick = closeCam;
 $('#camFlip').onclick = () => { cam.facing = cam.facing === 'environment' ? 'user' : 'environment'; startStream(); };
 document.querySelectorAll('.cam-modes button').forEach(b => b.onclick = () => {
@@ -551,8 +592,8 @@ document.querySelectorAll('.cam-modes button').forEach(b => b.onclick = () => {
 });
 // Release the camera if the app is backgrounded mid-capture.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && cam.stream) { if (cam.recorder?.state === 'recording') stopRecording(); stopStream(); }
-  else if (!document.hidden && !$('#cam').classList.contains('hidden') && !cam.stream) startStream();
+  if (document.hidden && cam.stream) { if (cam.recorder?.state === 'recording') stopRecording(); stopStream(); stopGeo(); }
+  else if (!document.hidden && !$('#cam').classList.contains('hidden') && !cam.stream) { startStream(); startGeo(); }
 });
 
 async function send() {

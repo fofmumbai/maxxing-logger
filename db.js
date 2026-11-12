@@ -78,6 +78,13 @@ for (const [col, def] of [['drive_id', 'TEXT'], ['drive_error', 'TEXT'], ['drive
 }
 db.exec(`CREATE TABLE IF NOT EXISTS drive_folders (key TEXT PRIMARY KEY, id TEXT NOT NULL)`);
 
+// Capture details sent by the phone: when it was taken and where (GPS), plus when the server received it.
+const CAPTURE_COLS = [['captured_at', 'INTEGER'], ['lat', 'REAL'], ['lng', 'REAL'], ['accuracy', 'REAL'], ['uploaded_at', 'INTEGER']];
+for (const table of ['uploads', 'media']) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  for (const [col, def] of CAPTURE_COLS) if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+
 // Room codes avoid look-alike characters (0/O, 1/I/L) so they're easy to read out loud.
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function makeCode(len = 6) {

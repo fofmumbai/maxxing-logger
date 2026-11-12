@@ -157,6 +157,10 @@
     .cam-ic:disabled { opacity: .35; }
     .cam-rec { display: inline-flex; align-items: center; gap: 8px; background: rgba(0,0,0,.55); border-radius: var(--pill); padding: 6px 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .cam-rec i { width: 10px; height: 10px; border-radius: 50%; background: var(--coral); animation: blink 1s infinite; }
+    .geo-pill { border: 0; font: inherit; font-size: 13px; font-weight: 700; color: #fff; background: rgba(0,0,0,.5); border-radius: var(--pill); padding: 7px 12px; cursor: pointer; white-space: nowrap; }
+    .geo-pill:empty, .cam.recording .geo-pill { display: none; }
+    .geo-pill.on { background: rgba(36,203,113,.85); color: var(--ink); }
+    .geo-pill.denied, .geo-pill.unavailable { background: rgba(255,118,118,.9); color: var(--ink); }
     @keyframes blink { 50% { opacity: .2; } }
     .cam-msg { position: relative; z-index: 2; align-self: center; justify-self: center; max-width: 320px; margin: 0 16px; text-align: center; background: rgba(30,30,30,.92); border-radius: 18px; padding: 18px; display: grid; gap: 12px; }
     .cam-bottom { grid-row: 3; padding: 12px 16px calc(20px + var(--safe-b)); background: linear-gradient(transparent, rgba(0,0,0,.6)); display: grid; gap: 14px; }
@@ -204,6 +208,7 @@
     <div class="hero">
       <h1>Mumbai <span class="hl">Maxxing</span></h1>
       <p>Join your team with the room code from your organiser. Max 4 members per team.</p>
+      <p class="small" style="margin-top:8px">📍 Photos and videos you send record when and where they were taken, so organisers can verify tasks.</p>
     </div>
     <form id="joinForm" class="card" style="padding:20px; display:grid; gap:14px;">
       <div class="field">
@@ -261,6 +266,7 @@
     <div class="cam-top">
       <button class="cam-ic" id="camClose" aria-label="Close camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <span class="cam-rec hidden" id="camRec"><i></i><span id="camTime">0:00</span></span>
+      <button class="geo-pill" id="geoPill" type="button"></button>
       <button class="cam-ic" id="camFlip" aria-label="Switch camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-3l-2-3H9L7 7H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z"/><path d="M9.5 12.5a2.5 2.5 0 0 1 4.3-1.7M14.5 13.5a2.5 2.5 0 0 1-4.3 1.7"/><path d="M14 9.5v1.5h-1.5M10 16.5V15h1.5"/></svg></button>
     </div>
     <div class="cam-msg hidden" id="camMsg"></div>

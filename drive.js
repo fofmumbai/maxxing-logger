@@ -225,7 +225,11 @@ async function uploadMedia(m) {
   const init = await gapi('/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': m.mime, 'X-Upload-Content-Length': String(size) },
-    body: JSON.stringify({ name, parents: [taskFolder], description: `Mumbai Maxxing · ${info.team_name} · ${info.task_title} · submission ${info.sub_id}` }),
+    body: JSON.stringify({ name, parents: [taskFolder], description: [
+      `Mumbai Maxxing · ${info.team_name} · ${info.task_title} · submission ${info.sub_id}`,
+      m.captured_at ? `Captured: ${new Date(m.captured_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST` : 'Captured: time unknown',
+      m.lat != null ? `Location: ${m.lat.toFixed(6)}, ${m.lng.toFixed(6)} (±${Math.round(m.accuracy || 0)} m) https://maps.google.com/?q=${m.lat},${m.lng}` : 'Location: not shared',
+    ].join('\n') }),
   });
   const session = init.headers.get('location');
   if (!session) throw new Error('Drive did not return an upload session');

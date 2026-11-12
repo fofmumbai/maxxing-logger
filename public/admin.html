@@ -92,6 +92,15 @@
     .media .m:hover .del-file, .media .del-file:focus-visible { opacity: 1; }
     .media .del-file:hover { background: var(--coral); color: var(--ink); }
     @media (hover: none) { .media .del-file { opacity: 1; } }
+    .media .pin { position: absolute; right: 6px; bottom: 6px; z-index: 1; font-size: 12px; background: rgba(255,255,255,.9); border-radius: var(--pill); padding: 1px 5px; }
+    .cap { font-size: 13px; margin-top: -4px; }
+    .cap a { color: var(--blue); font-weight: 700; text-decoration: none; }
+    .cap a:hover { text-decoration: underline; }
+    .cap.none { color: #9a3a10; }
+    .lb-cap { color: #fff; font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center; align-self: end; padding: 56px 8px 10px; text-align: center; }
+    .lb-cap a { color: var(--lime); font-weight: 700; }
+    .lb-cap .muted { color: #aaa; }
+    .lightbox img, .lightbox video { max-height: 76vh !important; }
     .sub-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: -2px; }
     .dlg-scrim { position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 16px; }
     .dlg { max-width: 440px; width: 100%; padding: 22px; display: grid; gap: 10px; }

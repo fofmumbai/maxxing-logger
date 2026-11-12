@@ -91,6 +91,8 @@ function mediaFor(subIds) {
   rows.forEach(m => (out[m.submission_id] ||= []).push({
     id: m.id, url: '/media/' + m.filename, kind: m.kind, mime: m.mime, size: m.size,
     driveUrl: m.drive_id ? `https://drive.google.com/file/d/${m.drive_id}/view` : null,
+    capturedAt: m.captured_at, uploadedAt: m.uploaded_at,
+    lat: m.lat, lng: m.lng, accuracy: m.accuracy,
   }));
   return out;
 }
@@ -165,6 +167,19 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, /^(image|video)\//.test(file.mimetype)),
 });
 
+// Time and GPS position the phone recorded when the photo/video was taken (all optional, validated).
+function captureMeta(body) {
+  const num = (v, min, max) => { const n = parseFloat(v); return Number.isFinite(n) && n >= min && n <= max ? n : null; };
+  const lat = num(body.lat, -90, 90), lng = num(body.lng, -180, 180);
+  const hasPos = lat !== null && lng !== null && !(lat === 0 && lng === 0);
+  return {
+    captured_at: num(body.captured_at, 1.5e12, 4e12), // ms since epoch
+    lat: hasPos ? lat : null,
+    lng: hasPos ? lng : null,
+    accuracy: hasPos ? num(body.accuracy, 0, 1e6) : null, // metres
+  };
+}
+
 // Step 1: each photo/video is uploaded on its own as soon as it's captured.
 app.post('/api/uploads', teamAuth, (req, res) => {
   upload.single('media')(req, res, err => {
@@ -175,8 +190,10 @@ app.post('/api/uploads', teamAuth, (req, res) => {
       return res.status(400).json({ error: msg });
     }
     if (!f) return res.status(400).json({ error: 'Only photos and videos can be uploaded.' });
-    const r = db.prepare('INSERT INTO uploads (member_id, team_id, filename, mime, kind, size) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(req.member.id, req.member.team_id, f.filename, f.mimetype, f.mimetype.startsWith('video/') ? 'video' : 'image', f.size);
+    const g = captureMeta(req.body);
+    const r = db.prepare('INSERT INTO uploads (member_id, team_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(req.member.id, req.member.team_id, f.filename, f.mimetype, f.mimetype.startsWith('video/') ? 'video' : 'image', f.size,
+        g.captured_at, g.lat, g.lng, g.accuracy, Date.now());
     res.json({ id: r.lastInsertRowid, size: f.size });
   });
 });
@@ -206,10 +223,13 @@ app.post('/api/submissions', teamAuth, (req, res) => {
   const subId = db.transaction(() => {
     const r = db.prepare('INSERT INTO submissions (team_id, task_id, member_id, note) VALUES (?, ?, ?, ?)')
       .run(teamId, taskId, req.member.id, String(req.body.note || '').slice(0, 500));
-    const ins = db.prepare('INSERT INTO media (submission_id, filename, mime, kind, size) VALUES (?, ?, ?, ?, ?)');
+    const ins = db.prepare('INSERT INTO media (submission_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const del = db.prepare('DELETE FROM uploads WHERE id = ?');
     // Keep the order the player captured them in.
-    ids.map(id => ups.find(u => u.id === id)).forEach(u => { ins.run(r.lastInsertRowid, u.filename, u.mime, u.kind, u.size); del.run(u.id); });
+    ids.map(id => ups.find(u => u.id === id)).forEach(u => {
+      ins.run(r.lastInsertRowid, u.filename, u.mime, u.kind, u.size, u.captured_at, u.lat, u.lng, u.accuracy, u.uploaded_at);
+      del.run(u.id);
+    });
     return r.lastInsertRowid;
   })();
 
@@ -449,10 +469,15 @@ drive.onChange.add(() => { clearTimeout(driveNotify); driveNotify = setTimeout((
 
 app.get('/api/admin/export.csv', adminAuth, (req, res) => {
   const rows = db.prepare(`
-    SELECT t.name team, k.title task, k.points, s.status, s.comment, m.name member, datetime(s.created_at,'unixepoch') submitted_at, datetime(s.reviewed_at,'unixepoch') reviewed_at
+    SELECT t.name team, k.title task, k.points, s.status, s.comment, m.name member,
+      datetime(s.created_at, 'unixepoch', '+330 minutes') submitted_at_ist, datetime(s.reviewed_at, 'unixepoch', '+330 minutes') reviewed_at_ist,
+      (SELECT group_concat(
+         md.kind || ' ' || COALESCE(strftime('%Y-%m-%d %H:%M:%S', md.captured_at / 1000, 'unixepoch', '+330 minutes') || ' IST', 'time unknown') || ' @ ' ||
+         CASE WHEN md.lat IS NULL THEN 'no location' ELSE printf('%.6f,%.6f (±%dm)', md.lat, md.lng, CAST(COALESCE(md.accuracy, 0) AS INTEGER)) END, ' | ')
+       FROM media md WHERE md.submission_id = s.id) media_capture
     FROM submissions s JOIN teams t ON t.id = s.team_id JOIN tasks k ON k.id = s.task_id LEFT JOIN members m ON m.id = s.member_id ORDER BY s.id`).all();
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const cols = ['team', 'task', 'points', 'status', 'comment', 'member', 'submitted_at', 'reviewed_at'];
+  const cols = ['team', 'task', 'points', 'status', 'comment', 'member', 'submitted_at_ist', 'reviewed_at_ist', 'media_capture'];
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="mumbai-maxxing-submissions.csv"');
   res.send([cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n'));
