@@ -53,4 +53,6 @@ jobs:
       - name: Check the live site responds
         env:
           URL: ${{ vars.DEPLOY_URL || 'https://mumbaimaxing.fofmumbai.com' }}
-        run: curl -fsS --retry 6 --retry-delay 5 --retry-all-errors -o /dev/null "$URL/" && echo "Live: $URL"
+        run: |
+          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors -o /dev/null "$URL/"
+          echo "Live at $URL"
