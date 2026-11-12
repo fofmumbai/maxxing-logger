@@ -18,6 +18,18 @@ const STATUS_ICON = {
 };
 const ICON_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
+// Styled confirmation popup (resolves true/false).
+function confirmBox(title, body, okLabel, danger = false) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'dlg-scrim';
+    el.innerHTML = `<div class="dlg" role="alertdialog" aria-modal="true" aria-label="${esc(title)}"><h3>${esc(title)}</h3><p>${body}</p>
+      <div class="dlg-actions"><button class="btn ghost" data-v="0">Cancel</button><button class="btn ${danger ? 'coral' : ''}" data-v="1">${esc(okLabel)}</button></div></div>`;
+    el.onclick = e => { const b = e.target.closest('[data-v]'); if (b || e.target === el) { el.remove(); resolve(b?.dataset.v === '1'); } };
+    document.body.appendChild(el);
+  });
+}
+
 function updateChipFade() {
   const c = $('#filterChips');
   c.classList.toggle('at-end', c.scrollLeft + c.clientWidth >= c.scrollWidth - 4);
@@ -162,7 +174,7 @@ function renderTeam() {
     ${'Notification' in window && !notifOk ? `<button class="btn lime block" id="notifBtn">Turn on review alerts</button>` : ''}
     <button class="linkbtn" id="leaveBtn">Sign out on this device</button>`;
   $('#notifBtn') && ($('#notifBtn').onclick = async () => { await Notification.requestPermission(); renderTeam(); });
-  $('#leaveBtn').onclick = () => { if (confirm('Sign out on this device? You can rejoin any time with the same room code and the same name.')) logout(); };
+  $('#leaveBtn').onclick = async () => { if (await confirmBox('Sign out on this device?', 'You can rejoin any time with the same room code and <b>the same name</b>.', 'Sign out')) logout(); };
 }
 
 async function renderBoard() {
@@ -197,9 +209,9 @@ function openTask(id) {
   openTaskId = id;
   renderSheet();
 }
-function closeSheet(force = false) {
+async function closeSheet(force = false) {
   if (sending && !force) return;
-  if (!force && draft.length && !confirm('Discard the photos/videos you captured?')) return;
+  if (!force && draft.length && !await confirmBox('Discard your captures?', draft.length > 1 ? `You have <b>${draft.length} photos/videos</b> that haven't been sent. They'll be deleted.` : `You have <b>1 photo/video</b> that hasn't been sent. It'll be deleted.`, 'Discard', true)) return;
   clearDraft();
   openTaskId = null;
   $('#sheetHost').innerHTML = '';

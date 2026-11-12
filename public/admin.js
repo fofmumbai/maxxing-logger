@@ -228,6 +228,7 @@ async function viewTeam(id) {
           <span class="muted small">ROOM CODE</span><b>${esc(team.code)}</b>
           <button class="btn ghost sm" id="copyLink">Copy join link</button>
           <button class="btn ghost sm" id="newCode">New code</button>
+          <button class="del-btn" id="deleteTeam">Delete team</button>
         </div>
         <div>
           <div class="muted small" style="margin-bottom:6px">MEMBERS · ${members.length}/${maxMembers}</div>
@@ -280,8 +281,18 @@ async function viewTeam(id) {
     try { await navigator.clipboard.writeText(link); toast('Copied', link); } catch { prompt('Join link', link); }
   };
   $('#newCode').onclick = async () => {
-    if (!confirm('Generate a new room code? The old code stops working for new joins (members already in stay in).')) return;
+    if (!await choose('Generate a new room code?', `The current code <b>${esc(team.code)}</b> stops working for new joins. Members already in the team stay in.`,
+      [{ label: 'Generate new code', value: true, kind: 'primary' }])) return;
     await api(`/api/admin/teams/${id}/new-code`, { method: 'POST' }); viewTeam(id);
+  };
+  $('#deleteTeam').onclick = async () => {
+    const files = submissions.reduce((a, s) => a + s.media.length, 0);
+    const ok = await choose(`Delete ${team.name}?`,
+      `This permanently deletes the team, signs out its <b>${members.length} member${members.length === 1 ? '' : 's'}</b>, and deletes its <b>${submissions.length} submission${submissions.length === 1 ? '' : 's'}</b> with <b>${files} photo${files === 1 ? '' : 's'}/video${files === 1 ? '' : 's'}</b> (moved to the Google Drive trash). Its <b>${team.points} points</b> leave the leaderboard. This can't be undone.`,
+      [{ label: 'Delete team', value: true, kind: 'danger' }]);
+    if (!ok) return;
+    try { await api('/api/admin/teams/' + id, { method: 'DELETE' }); toast(`${team.name} deleted`); location.hash = '#/teams'; }
+    catch (err) { toast('Error', err.message, 'rejected'); }
   };
   $$('[data-kick]').forEach(b => b.onclick = async () => {
     const name = esc(b.dataset.name), n = +b.dataset.subs;
@@ -368,10 +379,15 @@ async function viewTasks() {
   };
   $('#taskRows').onclick = async e => {
     const id = e.target.dataset.del;
-    if (!id || !confirm('Delete this task?')) return;
+    if (!id) return;
+    const row = e.target.closest('form');
+    const title = row?.querySelector('[name=title]')?.value || 'this task';
+    if (!await choose(`Delete "${title}"?`, 'It disappears from every team\'s task list.', [{ label: 'Delete task', value: true, kind: 'danger' }])) return;
     try { await api('/api/admin/tasks/' + id, { method: 'DELETE' }); }
     catch (err) {
-      if (!err.needsForce || !confirm(err.message + ' Delete anyway?')) return;
+      if (!err.needsForce) return toast('Error', err.message, 'rejected');
+      if (!await choose('This task has submissions', esc(err.message) + ' Their photos and videos are moved to the Google Drive trash.',
+        [{ label: 'Delete task and submissions', value: true, kind: 'danger' }])) return;
       await api('/api/admin/tasks/' + id + '?force=1', { method: 'DELETE' });
     }
     viewTasks();
@@ -438,7 +454,8 @@ async function viewSettings() {
     catch (err) { toast('Error', err.message, 'rejected'); }
   });
   $('#driveDisconnect') && ($('#driveDisconnect').onclick = async () => {
-    if (!confirm('Disconnect Google Drive? Files already in Drive stay there, but the dashboard can no longer show them until you reconnect. New uploads wait on the server.')) return;
+    if (!await choose('Disconnect Google Drive?', 'Files already in Drive stay there, but the dashboard can\'t show them until you reconnect. New uploads wait safely on the server.',
+      [{ label: 'Disconnect', value: true, kind: 'danger' }])) return;
     await api('/api/admin/drive/disconnect', { method: 'POST' }); viewSettings();
   });
   $('#driveRetry') && ($('#driveRetry').onclick = async () => { await api('/api/admin/drive/retry', { method: 'POST' }); toast('Retrying Drive uploads'); viewSettings(); });

@@ -348,6 +348,23 @@ app.delete('/api/admin/members/:id', adminAuth, (req, res) => {
   res.json({ ok: true, deletedFiles: files });
 });
 
+// Delete a team with its members, submissions and media (media goes to the Drive trash).
+app.delete('/api/admin/teams/:id', adminAuth, (req, res) => {
+  const t = db.prepare('SELECT id FROM teams WHERE id = ?').get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Team not found' });
+  let files = 0;
+  db.transaction(() => {
+    files = deleteSubmissions(db.prepare('SELECT id FROM submissions WHERE team_id = ?').all(t.id).map(r => r.id));
+    db.prepare('SELECT filename FROM uploads WHERE team_id = ?').all(t.id).forEach(u => fs.unlink(path.join(UPLOAD_DIR, u.filename), () => {}));
+    // Forget its Drive folders so a future team that reuses this id gets fresh ones.
+    db.prepare("DELETE FROM drive_folders WHERE key = ? OR key LIKE ?").run(`team:${t.id}`, `team:${t.id}:%`);
+    db.prepare('DELETE FROM teams WHERE id = ?').run(t.id); // members, submissions and uploads cascade
+  })();
+  toTeam(t.id, 'refresh', {}); // its players get signed out
+  toAdmins('teams', {});
+  res.json({ ok: true, deletedFiles: files });
+});
+
 // Delete a whole submission with all its photos/videos. Points update automatically.
 app.delete('/api/admin/submissions/:id', adminAuth, (req, res) => {
   const sub = db.prepare('SELECT team_id FROM submissions WHERE id = ?').get(req.params.id);
@@ -398,9 +415,8 @@ app.put('/api/admin/tasks/:id', adminAuth, (req, res) => {
 app.delete('/api/admin/tasks/:id', adminAuth, (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM submissions WHERE task_id = ?').get(req.params.id).n;
   if (n && req.query.force !== '1') return res.status(409).json({ error: `This task has ${n} submission(s). Deleting it removes them and their points.`, needsForce: true });
-  const files = db.prepare('SELECT filename FROM media JOIN submissions s ON s.id = media.submission_id WHERE s.task_id = ?').all(req.params.id);
+  deleteSubmissions(db.prepare('SELECT id FROM submissions WHERE task_id = ?').all(req.params.id).map(r => r.id));
   db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
-  files.forEach(f => fs.unlink(path.join(UPLOAD_DIR, f.filename), () => {}));
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
