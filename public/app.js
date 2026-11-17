@@ -39,6 +39,9 @@ const AVATAR_COLORS = ['var(--lime)', 'var(--coral)', 'var(--green)', '#C9C8FF']
 let token = store.get('mm_token');
 let state = null;
 let filter = 'all';
+// Task order: 'num' (task number), 'high' (most points first), 'low' (fewest points first). Remembered per phone.
+const SORTS = { num: 'Task #', high: 'Points ↓', low: 'Points ↑' };
+let taskSort = SORTS[store.get('mm_task_sort')] ? store.get('mm_task_sort') : 'num';
 let tab = 'tasks';
 let es = null;
 let openTaskId = null;
@@ -126,12 +129,13 @@ function render() {
   const counts = { all: tasks.length, todo: 0, pending: 0, approved: 0, rejected: 0 };
   statuses.forEach(s => counts[s.status]++);
   // Rejected first after To do: those need the team's attention. Empty filters are hidden (except All / To do).
-  $('#filterChips').innerHTML = ['all', 'todo', 'rejected', 'pending', 'approved'].filter(f => f === 'all' || f === 'todo' || counts[f] || filter === f).map(f =>
+  $('#filterChips').innerHTML = `<button class="chip sort" data-sort aria-label="Sort tasks: ${SORTS[taskSort]}. Tap to change.">⇅ ${SORTS[taskSort]}</button>` + ['all', 'todo', 'rejected', 'pending', 'approved'].filter(f => f === 'all' || f === 'todo' || counts[f] || filter === f).map(f =>
     `<button class="chip ${filter === f ? 'on' : ''}" data-f="${f}">${f === 'all' ? 'All' : STATUS_LABEL[f]}<span class="n">${counts[f]}</span></button>`).join('');
   $('#filterChips').classList.toggle('hidden', tab !== 'tasks');
   updateChipFade();
 
   const list = statuses.filter(s => filter === 'all' || s.status === filter);
+  if (taskSort !== 'num') list.sort((a, b) => (taskSort === 'high' ? b.t.points - a.t.points : a.t.points - b.t.points) || tasks.indexOf(a.t) - tasks.indexOf(b.t));
   $('#taskList').innerHTML = list.length ? list.map(({ t, status }) => `
     <button class="task card ${status}" data-task="${t.id}" aria-label="${esc(t.title)}, ${STATUS_LABEL[status]}, ${t.points} points">
       <span class="ic ${status}">${STATUS_ICON[status]}</span>
@@ -653,6 +657,13 @@ document.addEventListener('click', e => {
   }
   const task = e.target.closest('[data-task]');
   if (task) return openTask(+task.dataset.task);
+  if (e.target.closest('[data-sort]')) {
+    const order = Object.keys(SORTS);
+    taskSort = order[(order.indexOf(taskSort) + 1) % order.length];
+    store.set('mm_task_sort', taskSort);
+    render();
+    return;
+  }
   const chip = e.target.closest('[data-f]');
   if (chip) { filter = chip.dataset.f; render(); return; }
   const nav = e.target.closest('nav.bottom [data-tab]');
