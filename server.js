@@ -99,7 +99,7 @@ function mediaFor(subIds) {
 function teamState(teamId) {
   const team = db.prepare(`${scoreSql} WHERE t.id = ?`).get(teamId);
   const members = db.prepare('SELECT id, name, created_at FROM members WHERE team_id = ? ORDER BY id').all(teamId);
-  const tasks = db.prepare('SELECT id, title, description, points, min_photos, min_videos, needs_link, link_label FROM tasks ORDER BY sort, id').all();
+  const tasks = db.prepare('SELECT id, title, description, points, min_photos, min_videos, needs_link, link_label, opens_at, closes_at FROM tasks ORDER BY sort, id').all();
   const subs = db.prepare(`
     SELECT s.*, m.name AS member_name, k.title AS task_title, k.points
     FROM submissions s LEFT JOIN members m ON m.id = s.member_id JOIN tasks k ON k.id = s.task_id
@@ -138,7 +138,7 @@ app.post('/api/join', (req, res) => {
 });
 
 app.get('/api/me', teamAuth, (req, res) => {
-  res.json({ me: { id: req.member.id, name: req.member.name }, ...teamState(req.member.team_id) });
+  res.json({ me: { id: req.member.id, name: req.member.name }, serverNow: Date.now(), ...teamState(req.member.team_id) });
 });
 
 app.get('/api/leaderboard', teamAuth, (req, res) => {
@@ -205,6 +205,15 @@ app.delete('/api/uploads/:id', teamAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Task schedule (times stored as ms since epoch; shown in IST) ----------
+const CLOSE_GRACE_MS = 60 * 1000; // uploads already in flight when the timer hits zero still count
+const fmtIST = ms => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) + ' IST';
+function windowError(task, now = Date.now()) {
+  if (task.opens_at && now < task.opens_at) return `This task opens at ${fmtIST(task.opens_at)}.`;
+  if (task.closes_at && now > task.closes_at + CLOSE_GRACE_MS) return `Submissions for this task closed at ${fmtIST(task.closes_at)}.`;
+  return '';
+}
+
 // ---------- Task requirements ----------
 function cleanLink(v) {
   const s = String(v || '').trim().slice(0, 500);
@@ -239,6 +248,8 @@ app.post('/api/submissions', teamAuth, (req, res) => {
   if (ups.length !== ids.length) return res.status(400).json({ error: 'Some files are missing. Please capture them again.' });
   const link = cleanLink(req.body.link);
   if (req.body.link && String(req.body.link).trim() && !link) return res.status(400).json({ error: 'That link doesn\'t look right. Paste a full link starting with https://' });
+  const win = windowError(task);
+  if (win) return res.status(403).json({ error: win });
   const missing = missingRequirements(task, ups, link);
   if (missing) return res.status(400).json({ error: `Still needed: ${missing}.` });
 
@@ -449,22 +460,28 @@ function cleanTask(b) {
     link_label: String(b.link_label || '').trim().slice(0, 60),
   };
   if (t.min_photos + t.min_videos > MAX_FILES) t.min_photos = MAX_FILES - t.min_videos;
+  const ms = v => { const n = Number(v); return Number.isFinite(n) && n > 1.5e12 && n < 4e12 ? Math.round(n) : null; };
+  t.opens_at = ms(b.opens_at);
+  t.closes_at = ms(b.closes_at);
   return t;
 }
+const taskError = t => !t.title ? 'Title required' : t.opens_at && t.closes_at && t.closes_at <= t.opens_at ? 'The closing time must be after the opening time.' : '';
 app.post('/api/admin/tasks', adminAuth, (req, res) => {
   const t = cleanTask(req.body);
-  if (!t.title) return res.status(400).json({ error: 'Title required' });
+  const bad = taskError(t);
+  if (bad) return res.status(400).json({ error: bad });
   const sort = (db.prepare('SELECT MAX(sort) m FROM tasks').get().m || 0) + 1;
-  db.prepare('INSERT INTO tasks (title, description, points, sort, min_photos, min_videos, needs_link, link_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(t.title, t.description, t.points, sort, t.min_photos, t.min_videos, t.needs_link, t.link_label);
+  db.prepare('INSERT INTO tasks (title, description, points, sort, min_photos, min_videos, needs_link, link_label, opens_at, closes_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(t.title, t.description, t.points, sort, t.min_photos, t.min_videos, t.needs_link, t.link_label, t.opens_at, t.closes_at);
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
 app.put('/api/admin/tasks/:id', adminAuth, (req, res) => {
   const t = cleanTask(req.body);
-  if (!t.title) return res.status(400).json({ error: 'Title required' });
-  db.prepare('UPDATE tasks SET title = ?, description = ?, points = ?, min_photos = ?, min_videos = ?, needs_link = ?, link_label = ? WHERE id = ?')
-    .run(t.title, t.description, t.points, t.min_photos, t.min_videos, t.needs_link, t.link_label, req.params.id);
+  const bad = taskError(t);
+  if (bad) return res.status(400).json({ error: bad });
+  db.prepare('UPDATE tasks SET title = ?, description = ?, points = ?, min_photos = ?, min_videos = ?, needs_link = ?, link_label = ?, opens_at = ?, closes_at = ? WHERE id = ?')
+    .run(t.title, t.description, t.points, t.min_photos, t.min_videos, t.needs_link, t.link_label, t.opens_at, t.closes_at, req.params.id);
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });

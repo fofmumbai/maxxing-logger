@@ -81,7 +81,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS drive_folders (key TEXT PRIMARY KEY, id TEXT
 // What each task asks players to submit (all zero = legacy rule: at least one photo or video).
 {
   const cols = db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name);
-  for (const [col, def] of [['min_photos', 'INTEGER NOT NULL DEFAULT 0'], ['min_videos', 'INTEGER NOT NULL DEFAULT 0'], ['needs_link', 'INTEGER NOT NULL DEFAULT 0'], ['link_label', "TEXT NOT NULL DEFAULT ''"]]) {
+  for (const [col, def] of [['min_photos', 'INTEGER NOT NULL DEFAULT 0'], ['min_videos', 'INTEGER NOT NULL DEFAULT 0'], ['needs_link', 'INTEGER NOT NULL DEFAULT 0'], ['link_label', "TEXT NOT NULL DEFAULT ''"], ['opens_at', 'INTEGER'], ['closes_at', 'INTEGER']]) {
     if (!cols.includes(col)) db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`);
   }
   const scols = db.prepare('PRAGMA table_info(submissions)').all().map(c => c.name);

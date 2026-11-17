@@ -396,6 +396,26 @@ function reqParts(t) {
 }
 const reqPills = t => reqParts(t).map(p => `<span class="req-pill ${p.cls || ''}">${p.ic} ${esc(p.text)}</span>`).join('');
 
+// ---------- Task schedule (entered and shown in IST, stored as ms since epoch) ----------
+const IST_OFFSET_MS = 330 * 60 * 1000;
+const toISTInput = ms => ms ? new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 16) : '';
+const fromISTInput = v => v ? Date.parse(v + ':00+05:30') || null : null;
+const istTime = ms => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit' });
+const istDay = ms => new Date(ms).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
+function schedText(t) {
+  const o = t.opens_at, c = t.closes_at;
+  if (!o && !c) return '';
+  if (o && c) return istDay(o) === istDay(c) ? `${istDay(o)}, ${istTime(o)} – ${istTime(c)} IST` : `${istDay(o)} ${istTime(o)} → ${istDay(c)} ${istTime(c)} IST`;
+  return o ? `Opens ${istDay(o)}, ${istTime(o)} IST` : `Closes ${istDay(c)}, ${istTime(c)} IST`;
+}
+function schedPill(t) {
+  const txt = schedText(t);
+  if (!txt) return '';
+  const n = Date.now();
+  const st = t.opens_at && n < t.opens_at ? ['upcoming', 'Upcoming'] : t.closes_at && n >= t.closes_at ? ['closed', 'Closed'] : ['open', 'Open now'];
+  return `<span class="req-pill sched-${st[0]}">🕒 ${esc(txt)} · <b>${st[1]}</b></span>`;
+}
+
 async function viewTasks() {
   const tasks = tasksCache = await api('/api/admin/tasks');
   paint(`
@@ -410,7 +430,7 @@ async function viewTasks() {
         <div class="tmain">
           <div class="ttop"><b>${esc(t.title)}</b><span class="pill pts">+${t.points}</span></div>
           ${t.description ? `<div class="muted small tdesc">${esc(t.description)}</div>` : ''}
-          <div class="treq">${reqPills(t)}</div>
+          <div class="treq">${reqPills(t)}${schedPill(t)}</div>
         </div>
         <div class="tacts">
           <button class="icon-btn" data-move="${t.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up">↑</button>
@@ -442,7 +462,7 @@ async function viewTasks() {
 
 // Task editor (create or edit) with submission requirements and a live player preview.
 function editTask(task) {
-  const t = task || { title: '', description: '', points: 10, min_photos: 1, min_videos: 0, needs_link: 0, link_label: '' };
+  const t = task || { title: '', description: '', points: 10, min_photos: 1, min_videos: 0, needs_link: 0, link_label: '', opens_at: null, closes_at: null };
   const el = document.createElement('div');
   el.className = 'dlg-scrim';
   el.innerHTML = `
@@ -459,6 +479,16 @@ function editTask(task) {
         <label class="fl link-label ${t.needs_link ? '' : 'hidden'}">Link label (shown to players)<input class="input" name="link_label" maxlength="60" value="${esc(t.link_label)}" placeholder="e.g. Instagram reel link"></label>
         <p class="muted small hint">Players can't send until every requirement is met. Set everything to 0 with no link to allow "at least 1 photo or video" (the old rule).</p>
       </fieldset>
+      <fieldset class="reqset">
+        <legend>Schedule <span class="muted small">(optional, IST)</span></legend>
+        <label class="toggle-row"><span>🕒 Only accept submissions during a time window</span><span class="switch"><input type="checkbox" name="scheduled" ${t.opens_at || t.closes_at ? 'checked' : ''}><span></span></span></label>
+        <div class="sched-fields ${t.opens_at || t.closes_at ? '' : 'hidden'}">
+          <label class="fl">Opens at (IST)<input class="input" type="datetime-local" name="opens" value="${toISTInput(t.opens_at)}"></label>
+          <label class="fl">Closes at (IST)<input class="input" type="datetime-local" name="closes" value="${toISTInput(t.closes_at)}"></label>
+          <p class="muted small hint">Leave either empty for no limit on that side. Before it opens, players see the task locked with a countdown. After it closes, they can't submit.</p>
+          <p class="small sched-err hidden"></p>
+        </div>
+      </fieldset>
       <div class="preview"><span class="muted small">Players will see</span><div id="tprev"></div></div>
       <div class="dlg-actions"><button type="button" class="btn sm ghost" data-close>Cancel</button><button class="btn sm blue">${task ? 'Save changes' : 'Add task'}</button></div>
     </form>`;
@@ -466,14 +496,27 @@ function editTask(task) {
   const f = el.querySelector('form');
   const val = () => {
     const d = Object.fromEntries(new FormData(f));
-    return { ...d, points: +d.points || 0, min_photos: Math.max(0, Math.min(12, +d.min_photos || 0)), min_videos: Math.max(0, Math.min(5, +d.min_videos || 0)), needs_link: f.needs_link.checked ? 1 : 0 };
+    const on = f.scheduled.checked;
+    return { ...d, points: +d.points || 0, min_photos: Math.max(0, Math.min(12, +d.min_photos || 0)), min_videos: Math.max(0, Math.min(5, +d.min_videos || 0)), needs_link: f.needs_link.checked ? 1 : 0,
+      opens_at: on ? fromISTInput(f.opens.value) : null, closes_at: on ? fromISTInput(f.closes.value) : null };
   };
   const preview = () => {
     const v = val();
     f.querySelector('.link-label').classList.toggle('hidden', !v.needs_link);
-    f.querySelector('#tprev').innerHTML = `<div class="ttop"><b>${esc(v.title || 'Untitled task')}</b><span class="pill pts">+${v.points}</span></div><div class="treq">${reqPills(v)}</div>`;
+    f.querySelector('.sched-fields').classList.toggle('hidden', !f.scheduled.checked);
+    const err = v.opens_at && v.closes_at && v.closes_at <= v.opens_at ? 'Closing time must be after the opening time.' : '';
+    const errEl = f.querySelector('.sched-err'); errEl.textContent = err; errEl.classList.toggle('hidden', !err);
+    f.querySelector('#tprev').innerHTML = `<div class="ttop"><b>${esc(v.title || 'Untitled task')}</b><span class="pill pts">+${v.points}</span></div><div class="treq">${reqPills(v)}${schedPill(v)}</div>`;
   };
   f.oninput = preview;
+  // Turning the schedule on pre-fills a sensible window: the next full hour, for one hour.
+  f.scheduled.onchange = () => {
+    if (f.scheduled.checked && !f.opens.value && !f.closes.value) {
+      const start = Math.ceil(Date.now() / 3600000) * 3600000;
+      f.opens.value = toISTInput(start); f.closes.value = toISTInput(start + 3600000);
+    }
+    preview();
+  };
   f.onclick = e => {
     const st = e.target.closest('[data-step]');
     if (st) { const inp = f[st.dataset.step]; inp.value = Math.max(+inp.min, Math.min(+inp.max, (+inp.value || 0) + +st.dataset.d)); preview(); }
@@ -484,6 +527,8 @@ function editTask(task) {
     e.preventDefault();
     const v = val();
     if (!v.title.trim()) return f.title.focus();
+    if (v.opens_at && v.closes_at && v.closes_at <= v.opens_at) return f.closes.focus();
+    if (f.scheduled.checked && !v.opens_at && !v.closes_at) { toast('Set a time', 'Add an opening or closing time, or switch the schedule off.'); return f.opens.focus(); }
     try {
       await api(task ? '/api/admin/tasks/' + task.id : '/api/admin/tasks', { method: task ? 'PUT' : 'POST', body: JSON.stringify(v) });
       el.remove(); toast(task ? 'Task saved' : 'Task added'); viewTasks();

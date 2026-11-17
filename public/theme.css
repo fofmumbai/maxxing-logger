@@ -183,6 +183,23 @@ nav.bottom .dot { background: var(--wf-pink); color: #fff; }
 .feedback.pending { background: #FFE9B8; color: #6b3d00; }
 #sendBtn .upbar { background: rgba(17, 17, 17, .15); }
 
+/* Task schedule */
+.sched { font-size: 12px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.sched.up { color: var(--wf-blue); }
+.sched.open { color: #0b5a2f; }
+.sched.open.soon { color: var(--red); }
+.sched.closed { color: var(--muted); }
+.task.w-upcoming { background: #F3EEDC; }
+.task.w-upcoming h3, .task.w-closed h3 { color: #6f6a58; }
+.task.w-closed { background: #ECE7D6; opacity: .8; }
+.task.w-upcoming .ic { box-shadow: inset 0 0 0 2px rgba(17,17,17,.35); font-size: 14px; }
+.sched-card { display: grid; justify-items: center; gap: 4px; text-align: center; background: #fff; border: 2px solid var(--ink); border-radius: 16px; padding: 18px 14px; box-shadow: var(--hard); }
+.sched-card.closed { background: #EEE9D8; }
+.sched-when { font-size: 26px; letter-spacing: -0.02em; }
+.sched-big { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; background: var(--ink); color: var(--yellow); border-radius: 12px; padding: 4px 14px; margin: 8px 0 4px; }
+.sched-bar { background: #D3F0D2; color: #0b5a2f; border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.sched-bar.soon { background: #FFD6D3; color: #8a0f0f; }
+
 /* Task requirements */
 .req-chips { margin-left: 8px; font-weight: 700; color: #6b5410; letter-spacing: .01em; }
 .task.approved .req-chips { display: none; }

@@ -137,11 +137,12 @@ function render() {
   const list = statuses.filter(s => filter === 'all' || s.status === filter);
   if (taskSort === 'points') list.sort((a, b) => b.t.points - a.t.points || tasks.indexOf(a.t) - tasks.indexOf(b.t));
   $('#taskList').innerHTML = list.length ? list.map(({ t, status }) => `
-    <button class="task card ${status}" data-task="${t.id}" aria-label="${esc(t.title)}, ${STATUS_LABEL[status]}, ${t.points} points">
-      <span class="ic ${status}">${STATUS_ICON[status]}</span>
+    <button class="task card ${status} ${(status === 'todo' || status === 'rejected') && ['upcoming', 'closed'].includes(taskWindow(t).state) ? 'w-' + taskWindow(t).state : ''}" data-task="${t.id}" aria-label="${esc(t.title)}, ${STATUS_LABEL[status]}, ${t.points} points">
+      <span class="ic ${status}">${(status === 'todo' || status === 'rejected') && taskWindow(t).state === 'upcoming' ? '🔒' : STATUS_ICON[status]}</span>
       <div>
         <h3>${esc(t.title)}</h3>
         <div class="sub ${status}">#${tasks.indexOf(t) + 1}${status === 'todo' ? '' : ' · ' + STATUS_LABEL[status]}<span class="req-chips">${reqChips(t)}</span></div>
+        ${schedLine(t, status)}
       </div>
       <span class="pill pts">+${t.points}</span>
     </button>`).join('') : `<div class="empty">${filter === 'all' ? 'No tasks yet.' : `No ${STATUS_LABEL[filter].toLowerCase()} tasks.`}</div>`;
@@ -309,6 +310,52 @@ function lockSheet(locked) {
   document.querySelectorAll('.capture .btn, [data-rm], [data-retry], #closeSheet, #noteInput, #linkInput').forEach(b => (b.disabled = locked));
 }
 
+// ---------- Task schedule ----------
+// Countdowns use the server's clock (offset measured on every refresh), so a wrong phone clock can't skew them.
+let clockOffset = 0;
+const now = () => Date.now() + clockOffset;
+const IST_TZ = { timeZone: 'Asia/Kolkata' };
+const fmtClock = ms => new Date(ms).toLocaleTimeString('en-IN', { ...IST_TZ, hour: 'numeric', minute: '2-digit' });
+const fmtDay = ms => new Date(ms).toLocaleDateString('en-IN', { ...IST_TZ, weekday: 'short', day: 'numeric', month: 'short' });
+const sameISTDay = (a, b) => fmtDay(a) === fmtDay(b);
+const whenIST = ms => `${fmtClock(ms)} IST${sameISTDay(ms, now()) ? '' : ', ' + fmtDay(ms)}`;
+const SOON_MS = 10 * 60 * 1000;
+function taskWindow(t) {
+  const n = now();
+  if (!t.opens_at && !t.closes_at) return { state: 'always' };
+  if (t.opens_at && n < t.opens_at) return { state: 'upcoming', at: t.opens_at };
+  if (t.closes_at && n >= t.closes_at) return { state: 'closed', at: t.closes_at };
+  return t.closes_at ? { state: 'open', at: t.closes_at, soon: t.closes_at - n <= SOON_MS } : { state: 'always' };
+}
+// "1h 20m", "4m 10s", "45s" (short) or "01:20:15" / "2d 03:20:15" (clock).
+function fmtLeft(ms, style) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  if (style === 'clock') { const p = n => String(n).padStart(2, '0'); return (d ? `${d}d ` : '') + `${p(h)}:${p(m)}:${p(sec)}`; }
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+const cd = (at, style = 'short') => `<span data-cd="${at}" data-cd-style="${style}">${fmtLeft(at - now(), style)}</span>`;
+function schedLine(t, status) {
+  if (status === 'approved' || status === 'pending') return '';
+  const w = taskWindow(t);
+  if (w.state === 'upcoming') return `<div class="sched up">🔒 Opens ${whenIST(w.at)} · in ${cd(w.at)}</div>`;
+  if (w.state === 'open') return `<div class="sched open ${w.soon ? 'soon' : ''}">⏳ ${cd(w.at)} left · closes ${fmtClock(w.at)} IST</div>`;
+  if (w.state === 'closed') return `<div class="sched closed">Closed at ${whenIST(w.at)}</div>`;
+  return '';
+}
+// Tick every second: refresh countdown text; re-render when any task opens, closes or enters its last 10 minutes.
+let schedSig = '';
+setInterval(() => {
+  if (!state) return;
+  document.querySelectorAll('[data-cd]').forEach(el => { el.textContent = fmtLeft(+el.dataset.cd - now(), el.dataset.cdStyle); });
+  const sig = state.tasks.map(t => { const w = taskWindow(t); return w.state + (w.soon ? '!' : ''); }).join(',');
+  if (schedSig && sig !== schedSig) render();
+  schedSig = sig;
+}, 1000);
+
 // ---------- Task requirements ----------
 // All zero = legacy rule: at least one photo or video, either kind.
 const isLegacy = t => !t.min_photos && !t.min_videos && !t.needs_link;
@@ -368,7 +415,8 @@ function renderSheet() {
   const t = state.tasks.find(x => x.id === openTaskId);
   if (!t) { openTaskId = null; $('#sheetHost').innerHTML = ''; return; }
   const { status, sub, history } = taskStatus(t.id);
-  const canSubmit = state.submissionsOpen && (status === 'todo' || status === 'rejected');
+  const win = taskWindow(t);
+  const canSubmit = state.submissionsOpen && (status === 'todo' || status === 'rejected') && (win.state === 'open' || win.state === 'always');
   const prevScroll = $('#sheetHost .sheet')?.scrollTop || 0;
 
   let body = '';
@@ -378,6 +426,15 @@ function renderSheet() {
     body = `<div class="feedback pending"><b>Waiting for review</b><span>Sent by ${esc(sub.member_name || 'your team')} ${ago(sub.created_at)}. You'll be notified when organisers review it.</span></div>${linkHtml(sub)}${mediaHtml(sub.media)}`;
   } else {
     if (status === 'rejected') body += `<div class="feedback rejected"><b>Not accepted. Try again below</b><span>Organisers: “${esc(sub.comment)}”</span></div>`;
+    if ((status === 'todo' || status === 'rejected') && win.state === 'upcoming') {
+      body += `<div class="sched-card up"><span class="muted small">Submissions open at</span><b class="sched-when">${fmtClock(win.at)} IST</b><span class="muted small">${fmtDay(win.at)}</span>
+        <div class="sched-big">${cd(win.at, 'clock')}</div><span class="small">Keep this open. It unlocks automatically.</span></div>`;
+    } else if ((status === 'todo' || status === 'rejected') && win.state === 'closed') {
+      body += `<div class="sched-card closed"><b>Submissions closed</b><span class="small">This task closed at ${whenIST(win.at)}.</span></div>`;
+    }
+    if (canSubmit && win.state === 'open') {
+      body += `<div class="sched-bar ${win.soon ? 'soon' : ''}">⏳ <b>${cd(win.at, 'clock')}</b> left · closes ${whenIST(win.at)}</div>`;
+    }
     if (canSubmit) {
       const wantPhoto = isLegacy(t) || t.min_photos > 0, wantVideo = isLegacy(t) || t.min_videos > 0;
       body += reqListHtml(t) + `
@@ -843,7 +900,7 @@ function closePerms() {
 }
 
 async function load() {
-  try { state = await api('/api/me'); render(); } catch (e) { if (token) toast('Couldn\'t refresh', e.message); }
+  try { const t0 = Date.now(); state = await api('/api/me'); clockOffset = state.serverNow ? state.serverNow - (t0 + Date.now()) / 2 : 0; render(); } catch (e) { if (token) toast('Couldn\'t refresh', e.message); }
 }
 
 async function boot() {
