@@ -428,7 +428,7 @@ function renderSheet() {
     if (status === 'rejected') body += `<div class="feedback rejected"><b>Not accepted. Try again below</b><span>Organisers: “${esc(sub.comment)}”</span></div>`;
     if ((status === 'todo' || status === 'rejected') && win.state === 'upcoming') {
       body += `<div class="sched-card up"><span class="muted small">Submissions open at</span><b class="sched-when">${fmtClock(win.at)} IST</b><span class="muted small">${fmtDay(win.at)}</span>
-        <div class="sched-big">${cd(win.at, 'clock')}</div><span class="small">Keep this open. It unlocks automatically.</span></div>`;
+        <div class="sched-big">${cd(win.at, 'clock')}</div></div>`;
     } else if ((status === 'todo' || status === 'rejected') && win.state === 'closed') {
       body += `<div class="sched-card closed"><b>Submissions closed</b><span class="small">This task closed at ${whenIST(win.at)}.</span></div>`;
     }

@@ -86,8 +86,9 @@
 .fof-lockup .l4 { background: #4D49FC; margin-left: 6px; padding: 7px 12px; }
 
 /* ---------- Base element re-skin ---------- */
-body { background: var(--yellow); color: var(--ink); }
-.card { background: var(--cream); border: 2px solid var(--ink); box-shadow: var(--hard); }
+/* Same canvas as the organiser dashboard: cream graph paper */
+body { color: var(--ink); background-color: var(--cream); background-image: linear-gradient(var(--gridc) 1px, transparent 1px), linear-gradient(90deg, var(--gridc) 1px, transparent 1px); background-size: 24px 24px; }
+.card { background: #fff; border: 2px solid var(--ink); box-shadow: var(--hard); }
 .btn { border: 2px solid var(--ink); box-shadow: var(--hard); transition: transform .06s ease, box-shadow .06s ease; }
 .btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
 .btn.ghost { background: var(--cream); box-shadow: var(--hard); }
@@ -109,7 +110,7 @@ body { background: var(--yellow); color: var(--ink); }
 
 /* Join screen */
 #join { align-content: start; gap: 18px; padding-top: calc(18px + var(--safe-t)); }
-#join .stamp { padding: 18px; }
+#join .stamp { padding: 18px; background: var(--yellow); } /* yellow stamp frame on the cream page, like the poster */
 #join .poster { display: block; width: 100%; height: auto; }
 #codeInput { background: var(--cream); }
 .strip { display: block; width: 100%; height: auto; border-radius: 6px; }
@@ -131,7 +132,7 @@ body { background: var(--yellow); color: var(--ink); }
 .tagline { text-align: center; margin: 0; color: #5a4a12; font-size: 13px; }
 
 /* Header */
-header.top { background: rgba(255, 198, 11, .94); }
+header.top { background: var(--yellow); border-bottom: 2px solid var(--ink); }
 header.top .wordmark { height: 36px; width: auto; flex: none; }
 header.top .team .muted { color: #6b5410; }
 .score b { font-size: 30px; }
@@ -165,7 +166,7 @@ header.top .team .muted { color: #6b5410; }
 .section-title > span { font-size: 26px; }
 
 /* Bottom nav */
-nav.bottom { background: linear-gradient(to top, var(--yellow) 70%, rgba(255, 198, 11, 0)); }
+nav.bottom { background: linear-gradient(to top, var(--cream) 70%, rgba(255, 245, 207, 0)); }
 nav.bottom .bar { border: 2px solid var(--ink); box-shadow: var(--hard); }
 nav.bottom button.on { background: var(--yellow); color: var(--ink); }
 nav.bottom .dot { background: var(--wf-pink); color: #fff; }
@@ -244,8 +245,6 @@ nav.bottom .dot { background: var(--wf-pink); color: #fff; }
 /* ==========================================================================
    Organiser dashboard
    ========================================================================== */
-body.admin { background-color: var(--cream); background-image: linear-gradient(var(--gridc) 1px, transparent 1px), linear-gradient(90deg, var(--gridc) 1px, transparent 1px); background-size: 24px 24px; }
-body.admin .card { background: #fff; }
 body.admin header.top { background: var(--yellow); color: var(--ink); border-bottom: 2px solid var(--ink); }
 body.admin header.top .wm { height: 40px; width: auto; background: none; padding: 0; border-radius: 0; }
 body.admin header.top h1 { color: var(--ink); }

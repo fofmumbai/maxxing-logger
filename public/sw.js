@@ -1,5 +1,5 @@
 // App-shell service worker. API calls and uploaded media are never cached here.
-const CACHE = 'mm-shell-v6';
+const CACHE = 'mm-shell-v7';
 const SHELL = [
   '/', '/index.html', '/app.js', '/style.css', '/theme.css',
   '/img/theme/poster-hero.jpg', '/img/theme/wordmark.png', '/manifest.webmanifest',
