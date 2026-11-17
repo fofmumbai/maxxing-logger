@@ -183,6 +183,19 @@ nav.bottom .dot { background: var(--wf-pink); color: #fff; }
 .feedback.pending { background: #FFE9B8; color: #6b3d00; }
 #sendBtn .upbar { background: rgba(17, 17, 17, .15); }
 
+/* Task requirements */
+.req-chips { margin-left: 8px; font-weight: 700; color: #6b5410; letter-spacing: .01em; }
+.task.approved .req-chips { display: none; }
+.req { display: grid; gap: 6px; background: #fff; border: 2px solid var(--ink); border-radius: 14px; padding: 12px 14px; }
+.req-h { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #6b5410; }
+.req-row { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
+.req-row .req-n { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+.req-ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 2px rgba(17,17,17,.3); font-size: 13px; flex: none; }
+.req-row.ok .req-ic { background: var(--wf-green); color: #fff; box-shadow: none; }
+.req-row.ok .req-n { color: var(--wf-green); }
+.capture.one { grid-template-columns: 1fr; }
+.sub-link { display: block; font-weight: 700; color: var(--wf-blue); background: #fff; border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; word-break: break-all; text-decoration: none; }
+
 /* Updates, team, leaderboard */
 .update.unread .meta b::before { background: var(--wf-pink); }
 .codebox { background: var(--ink); color: var(--yellow); }

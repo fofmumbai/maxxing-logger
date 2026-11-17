@@ -99,7 +99,7 @@ function mediaFor(subIds) {
 function teamState(teamId) {
   const team = db.prepare(`${scoreSql} WHERE t.id = ?`).get(teamId);
   const members = db.prepare('SELECT id, name, created_at FROM members WHERE team_id = ? ORDER BY id').all(teamId);
-  const tasks = db.prepare('SELECT id, title, description, points FROM tasks ORDER BY sort, id').all();
+  const tasks = db.prepare('SELECT id, title, description, points, min_photos, min_videos, needs_link, link_label FROM tasks ORDER BY sort, id').all();
   const subs = db.prepare(`
     SELECT s.*, m.name AS member_name, k.title AS task_title, k.points
     FROM submissions s LEFT JOIN members m ON m.id = s.member_id JOIN tasks k ON k.id = s.task_id
@@ -205,6 +205,28 @@ app.delete('/api/uploads/:id', teamAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Task requirements ----------
+function cleanLink(v) {
+  const s = String(v || '').trim().slice(0, 500);
+  if (!s) return '';
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s);
+    return ['http:', 'https:'].includes(u.protocol) && u.hostname.includes('.') ? u.href : '';
+  } catch { return ''; }
+}
+// Returns a human list of what's missing ("1 photo, a link"), or '' when the task's requirements are met.
+function missingRequirements(task, ups, link) {
+  const photos = ups.filter(u => u.kind === 'image').length, videos = ups.filter(u => u.kind === 'video').length;
+  const legacy = !task.min_photos && !task.min_videos && !task.needs_link;
+  if (legacy) return ups.length ? '' : 'at least 1 photo or video';
+  const out = [];
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  if (photos < task.min_photos) out.push(plural(task.min_photos - photos, 'more photo'));
+  if (videos < task.min_videos) out.push(plural(task.min_videos - videos, 'more video'));
+  if (task.needs_link && !link) out.push('a link');
+  return out.join(', ');
+}
+
 // Step 2: Send attaches the already-uploaded files to a new submission.
 app.post('/api/submissions', teamAuth, (req, res) => {
   if (!getSetting('submissionsOpen', true)) return res.status(403).json({ error: 'Submissions are closed.' });
@@ -214,15 +236,18 @@ app.post('/api/submissions', teamAuth, (req, res) => {
   const ids = [...new Set((Array.isArray(req.body.upload_ids) ? req.body.upload_ids : []).map(Number).filter(Boolean))].slice(0, MAX_FILES);
   const teamId = req.member.team_id;
   const ups = ids.length ? db.prepare(`SELECT * FROM uploads WHERE team_id = ? AND id IN (${ids.map(() => '?').join(',')})`).all(teamId, ...ids) : [];
-  if (!ups.length) return res.status(400).json({ error: 'Add at least one photo or video.' });
   if (ups.length !== ids.length) return res.status(400).json({ error: 'Some files are missing. Please capture them again.' });
+  const link = cleanLink(req.body.link);
+  if (req.body.link && String(req.body.link).trim() && !link) return res.status(400).json({ error: 'That link doesn\'t look right. Paste a full link starting with https://' });
+  const missing = missingRequirements(task, ups, link);
+  if (missing) return res.status(400).json({ error: `Still needed: ${missing}.` });
 
   const blocking = db.prepare(`SELECT status FROM submissions WHERE team_id = ? AND task_id = ? AND status IN ('pending','approved') LIMIT 1`).get(teamId, taskId);
   if (blocking) return res.status(409).json({ error: blocking.status === 'approved' ? 'This task is already approved for your team.' : 'Your team already has a submission waiting for review on this task.' });
 
   const subId = db.transaction(() => {
-    const r = db.prepare('INSERT INTO submissions (team_id, task_id, member_id, note) VALUES (?, ?, ?, ?)')
-      .run(teamId, taskId, req.member.id, String(req.body.note || '').slice(0, 500));
+    const r = db.prepare('INSERT INTO submissions (team_id, task_id, member_id, note, link) VALUES (?, ?, ?, ?, ?)')
+      .run(teamId, taskId, req.member.id, String(req.body.note || '').slice(0, 500), link);
     const ins = db.prepare('INSERT INTO media (submission_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const del = db.prepare('DELETE FROM uploads WHERE id = ?');
     // Keep the order the player captured them in.
@@ -400,35 +425,60 @@ app.delete('/api/admin/media/:id', adminAuth, (req, res) => {
   const m = db.prepare('SELECT media.*, s.team_id FROM media JOIN submissions s ON s.id = media.submission_id WHERE media.id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'File not found' });
   const left = db.prepare('SELECT COUNT(*) n FROM media WHERE submission_id = ?').get(m.submission_id).n;
-  if (left <= 1) deleteSubmissions([m.submission_id]);
+  const hasLink = !!db.prepare("SELECT 1 FROM submissions WHERE id = ? AND link != ''").get(m.submission_id);
+  const dropSub = left <= 1 && !hasLink;
+  if (dropSub) deleteSubmissions([m.submission_id]);
   else { db.prepare('DELETE FROM media WHERE id = ?').run(m.id); purgeMedia([m]); }
   toTeam(m.team_id, 'refresh', {});
   toAdmins('reviewed', { teamId: m.team_id });
-  res.json({ ok: true, submissionDeleted: left <= 1 });
+  res.json({ ok: true, submissionDeleted: dropSub });
 });
 
 app.get('/api/admin/tasks', adminAuth, (req, res) => {
   res.json(db.prepare('SELECT * FROM tasks ORDER BY sort, id').all());
 });
 function cleanTask(b) {
-  return {
+  const int = (v, max) => Math.max(0, Math.min(max, parseInt(v, 10) || 0));
+  const t = {
     title: String(b.title || '').trim().slice(0, 120),
     description: String(b.description || '').trim().slice(0, 1000),
-    points: Math.max(0, Math.min(10000, parseInt(b.points, 10) || 0)),
+    points: int(b.points, 10000),
+    min_photos: int(b.min_photos, MAX_FILES),
+    min_videos: int(b.min_videos, 5),
+    needs_link: b.needs_link === true || b.needs_link === 1 || b.needs_link === '1' || b.needs_link === 'on' ? 1 : 0,
+    link_label: String(b.link_label || '').trim().slice(0, 60),
   };
+  if (t.min_photos + t.min_videos > MAX_FILES) t.min_photos = MAX_FILES - t.min_videos;
+  return t;
 }
 app.post('/api/admin/tasks', adminAuth, (req, res) => {
   const t = cleanTask(req.body);
   if (!t.title) return res.status(400).json({ error: 'Title required' });
   const sort = (db.prepare('SELECT MAX(sort) m FROM tasks').get().m || 0) + 1;
-  db.prepare('INSERT INTO tasks (title, description, points, sort) VALUES (?, ?, ?, ?)').run(t.title, t.description, t.points, sort);
+  db.prepare('INSERT INTO tasks (title, description, points, sort, min_photos, min_videos, needs_link, link_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(t.title, t.description, t.points, sort, t.min_photos, t.min_videos, t.needs_link, t.link_label);
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
 app.put('/api/admin/tasks/:id', adminAuth, (req, res) => {
   const t = cleanTask(req.body);
   if (!t.title) return res.status(400).json({ error: 'Title required' });
-  db.prepare('UPDATE tasks SET title = ?, description = ?, points = ? WHERE id = ?').run(t.title, t.description, t.points, req.params.id);
+  db.prepare('UPDATE tasks SET title = ?, description = ?, points = ?, min_photos = ?, min_videos = ?, needs_link = ?, link_label = ? WHERE id = ?')
+    .run(t.title, t.description, t.points, t.min_photos, t.min_videos, t.needs_link, t.link_label, req.params.id);
+  toAllTeams('refresh', {});
+  res.json({ ok: true });
+});
+// Reorder: swap with the neighbour above (dir = -1) or below (dir = 1).
+app.post('/api/admin/tasks/:id/move', adminAuth, (req, res) => {
+  const dir = req.body.dir === -1 || req.body.dir === '-1' ? -1 : 1;
+  db.transaction(() => {
+    const all = db.prepare('SELECT id FROM tasks ORDER BY sort, id').all().map(r => r.id);
+    const i = all.indexOf(+req.params.id), j = i + dir;
+    if (i < 0 || j < 0 || j >= all.length) return;
+    [all[i], all[j]] = [all[j], all[i]];
+    const upd = db.prepare('UPDATE tasks SET sort = ? WHERE id = ?');
+    all.forEach((id, k) => upd.run(k + 1, id));
+  })();
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
@@ -469,7 +519,7 @@ drive.onChange.add(() => { clearTimeout(driveNotify); driveNotify = setTimeout((
 
 app.get('/api/admin/export.csv', adminAuth, (req, res) => {
   const rows = db.prepare(`
-    SELECT t.name team, k.title task, k.points, s.status, s.comment, m.name member,
+    SELECT t.name team, k.title task, k.points, s.status, s.comment, m.name member, s.link,
       datetime(s.created_at, 'unixepoch', '+330 minutes') submitted_at_ist, datetime(s.reviewed_at, 'unixepoch', '+330 minutes') reviewed_at_ist,
       (SELECT group_concat(
          md.kind || ' ' || COALESCE(strftime('%Y-%m-%d %H:%M:%S', md.captured_at / 1000, 'unixepoch', '+330 minutes') || ' IST', 'time unknown') || ' @ ' ||
@@ -477,7 +527,7 @@ app.get('/api/admin/export.csv', adminAuth, (req, res) => {
        FROM media md WHERE md.submission_id = s.id) media_capture
     FROM submissions s JOIN teams t ON t.id = s.team_id JOIN tasks k ON k.id = s.task_id LEFT JOIN members m ON m.id = s.member_id ORDER BY s.id`).all();
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const cols = ['team', 'task', 'points', 'status', 'comment', 'member', 'submitted_at_ist', 'reviewed_at_ist', 'media_capture'];
+  const cols = ['team', 'task', 'points', 'status', 'comment', 'member', 'link', 'submitted_at_ist', 'reviewed_at_ist', 'media_capture'];
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="mumbai-maxxing-submissions.csv"');
   res.send([cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n'));

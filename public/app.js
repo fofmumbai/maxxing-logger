@@ -141,7 +141,7 @@ function render() {
       <span class="ic ${status}">${STATUS_ICON[status]}</span>
       <div>
         <h3>${esc(t.title)}</h3>
-        <div class="sub ${status}">#${tasks.indexOf(t) + 1}${status === 'todo' ? '' : ' · ' + STATUS_LABEL[status]}</div>
+        <div class="sub ${status}">#${tasks.indexOf(t) + 1}${status === 'todo' ? '' : ' · ' + STATUS_LABEL[status]}<span class="req-chips">${reqChips(t)}</span></div>
       </div>
       <span class="pill pts">+${t.points}</span>
     </button>`).join('') : `<div class="empty">${filter === 'all' ? 'No tasks yet.' : `No ${STATUS_LABEL[filter].toLowerCase()} tasks.`}</div>`;
@@ -240,6 +240,7 @@ const fmtMB = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1,
 const fmtDur = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
 function pump() {
+  if ($('#reqList')) { const t = state?.tasks.find(x => x.id === openTaskId); if (t) $('#reqList').outerHTML = reqListHtml(t); }
   const active = draft.filter(d => d.state === 'uploading').length;
   draft.filter(d => d.state === 'queued').slice(0, Math.max(0, MAX_PARALLEL - active)).forEach(uploadItem);
   updateSendBtn();
@@ -294,7 +295,10 @@ function updateSendBtn() {
   const failed = draft.filter(d => d.state === 'error').length;
   const total = draft.reduce((a, d) => a + d.file.size, 0) || 1;
   const pct = Math.round(draft.reduce((a, d) => a + d.file.size * (d.progress || 0), 0) / total * 100);
-  btn.disabled = !n || sending;
+  const t = state?.tasks.find(x => x.id === openTaskId);
+  const rq = t ? reqStatus(t) : { ok: n > 0, missing: [] };
+  btn.disabled = !rq.ok || sending;
+  if (!rq.ok && !sending) { btn.innerHTML = `<span style="display:grid; gap:4px; justify-items:center">Send for review<span class="small" style="font-weight:400">Still needed: ${esc(rq.missing.join(' · '))}</span></span>`; return; }
   if (!n) { btn.innerHTML = 'Send for review'; return; }
   const label = sending ? (done < n ? `Finishing uploads… ${pct}%` : 'Submitting…') : `Send ${n} item${n > 1 ? 's' : ''} for review`;
   const sub = failed ? `${failed} failed, tap to retry` : done < n ? `Uploading ${done}/${n} · ${pct}%` : `All ${n} uploaded ✓`;
@@ -302,9 +306,54 @@ function updateSendBtn() {
 }
 
 function lockSheet(locked) {
-  document.querySelectorAll('.capture .btn, [data-rm], [data-retry], #closeSheet, #noteInput').forEach(b => (b.disabled = locked));
+  document.querySelectorAll('.capture .btn, [data-rm], [data-retry], #closeSheet, #noteInput, #linkInput').forEach(b => (b.disabled = locked));
 }
 
+// ---------- Task requirements ----------
+// All zero = legacy rule: at least one photo or video, either kind.
+const isLegacy = t => !t.min_photos && !t.min_videos && !t.needs_link;
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+function reqChips(t) {
+  if (isLegacy(t)) return '📷/🎥';
+  return [t.min_photos ? `📷 ${t.min_photos}` : '', t.min_videos ? `🎥 ${t.min_videos}` : '', t.needs_link ? '🔗' : ''].filter(Boolean).join(' · ');
+}
+function validLink(v) {
+  const s = String(v || '').trim();
+  if (!s) return false;
+  try { const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s); return /^https?:$/.test(u.protocol) && u.hostname.includes('.'); } catch { return false; }
+}
+// Checklist rows + whether everything required is in place.
+function reqStatus(t) {
+  const photos = draft.filter(d => d.kind === 'image').length, videos = draft.filter(d => d.kind === 'video').length;
+  const link = $('#linkInput')?.value || '';
+  const rows = [];
+  if (isLegacy(t)) rows.push({ label: 'At least 1 photo or video', have: photos + videos, need: 1, noun: 'photo or video' });
+  else {
+    if (t.min_photos) rows.push({ label: plural(t.min_photos, 'photo'), have: photos, need: t.min_photos, noun: 'photo' });
+    if (t.min_videos) rows.push({ label: plural(t.min_videos, 'video'), have: videos, need: t.min_videos, noun: 'video' });
+    if (t.needs_link) rows.push({ label: t.link_label || 'A link', have: validLink(link) ? 1 : 0, need: 1, isLink: true });
+  }
+  const missing = rows.filter(r => r.have < r.need).map(r => r.isLink ? 'a link' : plural(r.need - r.have, 'more ' + r.noun));
+  return { rows, ok: rows.every(r => r.have >= r.need), missing };
+}
+function reqListHtml(t) {
+  const { rows } = reqStatus(t);
+  return `<div class="req" id="reqList"><b class="req-h">What to submit</b>${rows.map(r => {
+    const done = r.have >= r.need;
+    return `<div class="req-row ${done ? 'ok' : ''}"><span class="req-ic">${done ? '✓' : ''}</span><span>${esc(r.label)}</span>${r.isLink ? '' : `<span class="req-n">${Math.min(r.have, r.need)}/${r.need}</span>`}</div>`;
+  }).join('')}</div>`;
+}
+function refreshReq() {
+  const t = state?.tasks.find(x => x.id === openTaskId);
+  const el = $('#reqList');
+  if (t && el) el.outerHTML = reqListHtml(t);
+  updateSendBtn();
+}
+
+function linkHtml(sub) {
+  if (!sub?.link) return '';
+  return `<a class="sub-link" href="${esc(sub.link)}" target="_blank" rel="noopener">🔗 ${esc(sub.link.replace(/^https?:\/\//, '').slice(0, 60))}</a>`;
+}
 function mediaHtml(list) {
   return `<div class="thumbs">${list.map(m => `
     <div class="thumb" data-view="${esc(m.url)}" data-kind="${m.kind}">
@@ -324,25 +373,28 @@ function renderSheet() {
 
   let body = '';
   if (status === 'approved') {
-    body = `<div class="feedback approved"><b>+${t.points} points earned 🎉</b>${sub.comment ? `<span>Organisers: “${esc(sub.comment)}”</span>` : ''}</div>${mediaHtml(sub.media)}`;
+    body = `<div class="feedback approved"><b>+${t.points} points earned 🎉</b>${sub.comment ? `<span>Organisers: “${esc(sub.comment)}”</span>` : ''}</div>${linkHtml(sub)}${mediaHtml(sub.media)}`;
   } else if (status === 'pending') {
-    body = `<div class="feedback pending"><b>Waiting for review</b><span>Sent by ${esc(sub.member_name || 'your team')} ${ago(sub.created_at)}. You'll be notified when organisers review it.</span></div>${mediaHtml(sub.media)}`;
+    body = `<div class="feedback pending"><b>Waiting for review</b><span>Sent by ${esc(sub.member_name || 'your team')} ${ago(sub.created_at)}. You'll be notified when organisers review it.</span></div>${linkHtml(sub)}${mediaHtml(sub.media)}`;
   } else {
     if (status === 'rejected') body += `<div class="feedback rejected"><b>Not accepted. Try again below</b><span>Organisers: “${esc(sub.comment)}”</span></div>`;
     if (canSubmit) {
-      body += `
-        <div class="capture">
-          <button class="btn" id="takePhoto">${ICON_CAM}Take photo</button>
-          <button class="btn blue" id="takeVideo">${ICON_VID}Record video</button>
-        </div>
+      const wantPhoto = isLegacy(t) || t.min_photos > 0, wantVideo = isLegacy(t) || t.min_videos > 0;
+      body += reqListHtml(t) + `
+        ${wantPhoto || wantVideo ? `<div class="capture ${wantPhoto && wantVideo ? '' : 'one'}">
+          ${wantPhoto ? `<button class="btn" id="takePhoto">${ICON_CAM}Take photo</button>` : ''}
+          ${wantVideo ? `<button class="btn blue" id="takeVideo">${ICON_VID}Record video</button>` : ''}
+        </div>` : ''}
+        ${t.needs_link ? `<div class="field"><label for="linkInput">${esc(t.link_label || 'Link')}</label>
+          <input id="linkInput" class="input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://" maxlength="500"></div>` : ''}
         ${draft.length ? `<div class="thumbs">${draft.map(d => `
           <div class="thumb" data-key="${d.key}">${d.kind === 'video' ? `<video src="${d.url}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${d.url}" alt="">`}
           <span class="tag">${d.meta?.lat != null ? '📍 ' : ''}${d.kind === 'video' ? `▶ ${fmtDur(d.duration || 0)} · ` : ''}${fmtMB(d.file.size)}</span>
           <div class="ov">${overlayHtml(d)}</div>
           <button class="x" data-rm="${d.key}" aria-label="Remove">×</button></div>`).join('')}</div>`
-          : `<p class="muted small" style="margin:0">Camera only: capture photos and videos live. Add as many as you need, then send.</p>`}
+          : wantPhoto || wantVideo ? `<p class="muted small" style="margin:0">Camera only: capture live with the buttons above, then send.</p>` : ''}
         <textarea id="noteInput" class="input" placeholder="Add a note for the organisers (optional)" maxlength="500"></textarea>
-        <button class="btn lime block" id="sendBtn" ${draft.length ? '' : 'disabled'}>Send ${draft.length ? draft.length + ' item' + (draft.length > 1 ? 's' : '') : ''} for review</button>`;
+        <button class="btn lime block" id="sendBtn" disabled>Send for review</button>`;
     } else if (!state.submissionsOpen) {
       body += `<div class="feedback pending"><b>Submissions are closed</b></div>`;
     }
@@ -352,6 +404,7 @@ function renderSheet() {
     <div style="margin-top:10px; display:grid; gap:6px"><span class="pill st-${h.status}" style="justify-self:start">${STATUS_LABEL[h.status]}</span>${h.comment ? `<span class="small">“${esc(h.comment)}”</span>` : ''}${mediaHtml(h.media)}</div>`).join('')}</details>`;
 
   const note = $('#noteInput')?.value || '';
+  const linkVal = $('#linkInput')?.value || '';
   $('#sheetHost').innerHTML = `
     <div class="scrim" id="scrim"></div>
     <div class="sheet" role="dialog" aria-modal="true"><div class="inner">
@@ -367,6 +420,7 @@ function renderSheet() {
   document.body.style.overflow = 'hidden';
   $('#sheetHost .sheet').scrollTop = prevScroll;
   if ($('#noteInput')) $('#noteInput').value = note;
+  if ($('#linkInput')) { $('#linkInput').value = linkVal; $('#linkInput').oninput = refreshReq; refreshReq(); }
 
   // Wrap in arrows: passing closeSheet directly would hand it the click event as "force" and skip the discard prompt.
   $('#scrim').onclick = () => closeSheet();
@@ -600,7 +654,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function send() {
-  if (sending || !draft.length) return;
+  const task = state.tasks.find(x => x.id === openTaskId);
+  if (sending || !task || !reqStatus(task).ok) return;
   draft.filter(d => d.state === 'error').forEach(d => { d.state = 'queued'; d.progress = 0; paintItem(d); });
   sending = true;
   lockSheet(true);
@@ -615,7 +670,7 @@ async function send() {
   const taskId = openTaskId;
   const items = draft.length;
   try {
-    await api('/api/submissions', { method: 'POST', body: JSON.stringify({ task_id: taskId, note: $('#noteInput')?.value || '', upload_ids: draft.map(d => d.uploadId) }) });
+    await api('/api/submissions', { method: 'POST', body: JSON.stringify({ task_id: taskId, note: $('#noteInput')?.value || '', link: $('#linkInput')?.value || '', upload_ids: draft.map(d => d.uploadId) }) });
     sending = false;
     clearDraft(false);
     showDone(taskId, items);
@@ -636,7 +691,7 @@ function showDone(taskId, items) {
       <div class="truck-band" aria-hidden="true"></div>
       <div class="done-check">✓</div>
       <h2 class="sticker green">Submitted!</h2>
-      <p><b>${esc(t ? t.title : 'Task')}</b> · ${items} item${items > 1 ? 's' : ''} uploaded.<br>Organisers will review it soon, and you'll get a notification here.</p>
+      <p><b>${esc(t ? t.title : 'Task')}</b>${items ? ` · ${items} item${items > 1 ? 's' : ''} uploaded` : ''}.<br>Organisers will review it soon, and you'll get a notification here.</p>
       <button class="btn block" id="doneOk">Back to tasks</button>
     </div>`;
   document.body.appendChild(el);

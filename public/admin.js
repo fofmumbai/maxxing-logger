@@ -157,6 +157,7 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
       </div>
       <div class="media">${s.media.map(mediaTile).join('')}</div>
       ${captureLine(s)}
+      ${s.link ? `<a class="sub-link" href="${esc(s.link)}" target="_blank" rel="noopener">🔗 ${esc(s.link.replace(/^https?:\/\//, '').slice(0, 70))}</a>` : ''}
       ${s.note ? `<div class="note"><b>Team note:</b> ${esc(s.note)}</div>` : ''}
       ${!pending ? `<div class="reviewed ${s.status}"><b>${s.status === 'approved' ? 'Approved' : 'Rejected'}</b> ${ago(s.reviewed_at)}${s.comment ? ` · “${esc(s.comment)}”` : ''}</div>` : ''}
       <div class="rv ${pending || drafts[s.id] !== undefined ? '' : 'hidden'}" style="display:grid; gap:8px">
@@ -383,53 +384,113 @@ async function viewBoard() {
 }
 
 // ---------- Tasks editor ----------
+// Requirement summary used in the task list, editor preview and submission cards.
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+function reqParts(t) {
+  if (!t.min_photos && !t.min_videos && !t.needs_link) return [{ ic: '📷', text: '1+ photo or video', cls: 'any' }];
+  return [
+    t.min_photos ? { ic: '📷', text: plural(t.min_photos, 'photo') } : null,
+    t.min_videos ? { ic: '🎥', text: plural(t.min_videos, 'video') } : null,
+    t.needs_link ? { ic: '🔗', text: t.link_label || 'Link' } : null,
+  ].filter(Boolean);
+}
+const reqPills = t => reqParts(t).map(p => `<span class="req-pill ${p.cls || ''}">${p.ic} ${esc(p.text)}</span>`).join('');
+
 async function viewTasks() {
   const tasks = tasksCache = await api('/api/admin/tasks');
   paint(`
-    <div class="toolbar"><h2>Tasks</h2><span class="muted small">${tasks.length} tasks · ${tasks.reduce((a, t) => a + t.points, 0)} points available</span></div>
-    <form id="newTask" class="card taskrow" style="margin-bottom:16px; border:0">
-      <b>+</b>
-      <input class="input" name="title" placeholder="New task title" required>
-      <input class="input desc" name="description" placeholder="Description / rules">
-      <input class="input" name="points" type="number" min="0" value="10" placeholder="Pts">
-      <div class="acts"><button class="btn blue sm">Add</button></div>
-    </form>
-    <div class="card" id="taskRows">${tasks.map((t, i) => `
-      <form class="taskrow" data-task="${t.id}">
-        <b class="muted">${i + 1}</b>
-        <input class="input" name="title" value="${esc(t.title)}" required>
-        <input class="input desc" name="description" value="${esc(t.description)}" placeholder="Description">
-        <input class="input" name="points" type="number" min="0" value="${t.points}">
-        <div class="acts"><button class="btn blue sm save">Save</button><button type="button" class="del-btn" data-del="${t.id}" aria-label="Delete task ${i + 1}">Delete</button></div>
-      </form>`).join('')}</div>`);
-  const fd = f => Object.fromEntries(new FormData(f));
-  // Save only appears on rows that were edited.
-  $('#taskRows').oninput = e => e.target.form?.classList.add('dirty');
-  $('#taskRows').onsubmit = async e => {
-    e.preventDefault();
-    try { await api('/api/admin/tasks/' + e.target.dataset.task, { method: 'PUT', body: JSON.stringify(fd(e.target)) }); toast('Task saved'); viewTasks(); }
+    <div class="toolbar">
+      <h2>Tasks</h2>
+      <span class="muted small">${tasks.length} tasks · ${tasks.reduce((a, t) => a + t.points, 0)} points available</span>
+      <button class="btn blue sm" id="newTaskBtn">+ New task</button>
+    </div>
+    <div class="tlist">${tasks.map((t, i) => `
+      <div class="card titem">
+        <div class="tnum">${i + 1}</div>
+        <div class="tmain">
+          <div class="ttop"><b>${esc(t.title)}</b><span class="pill pts">+${t.points}</span></div>
+          ${t.description ? `<div class="muted small tdesc">${esc(t.description)}</div>` : ''}
+          <div class="treq">${reqPills(t)}</div>
+        </div>
+        <div class="tacts">
+          <button class="icon-btn" data-move="${t.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up">↑</button>
+          <button class="icon-btn" data-move="${t.id}" data-dir="1" ${i === tasks.length - 1 ? 'disabled' : ''} aria-label="Move down" title="Move down">↓</button>
+          <button class="btn ghost sm" data-edit="${t.id}">Edit</button>
+          <button class="del-btn" data-del="${t.id}" aria-label="Delete task ${i + 1}">Delete</button>
+        </div>
+      </div>`).join('') || '<div class="empty">No tasks yet. Add one with “+ New task”.</div>'}</div>`);
+
+  $('#newTaskBtn').onclick = () => editTask(null);
+  $$('[data-edit]').forEach(b => b.onclick = () => editTask(tasks.find(t => t.id === +b.dataset.edit)));
+  $$('[data-move]').forEach(b => b.onclick = async () => {
+    try { await api(`/api/admin/tasks/${b.dataset.move}/move`, { method: 'POST', body: JSON.stringify({ dir: +b.dataset.dir }) }); viewTasks(); }
     catch (err) { toast('Error', err.message, 'rejected'); }
-  };
-  $('#taskRows').onclick = async e => {
-    const id = e.target.dataset.del;
-    if (!id) return;
-    const row = e.target.closest('form');
-    const title = row?.querySelector('[name=title]')?.value || 'this task';
-    if (!await choose(`Delete "${title}"?`, 'It disappears from every team\'s task list.', [{ label: 'Delete task', value: true, kind: 'danger' }])) return;
-    try { await api('/api/admin/tasks/' + id, { method: 'DELETE' }); }
+  });
+  $$('[data-del]').forEach(b => b.onclick = async () => {
+    const t = tasks.find(x => x.id === +b.dataset.del);
+    if (!await choose(`Delete "${t.title}"?`, 'It disappears from every team\'s task list.', [{ label: 'Delete task', value: true, kind: 'danger' }])) return;
+    try { await api('/api/admin/tasks/' + t.id, { method: 'DELETE' }); }
     catch (err) {
       if (!err.needsForce) return toast('Error', err.message, 'rejected');
       if (!await choose('This task has submissions', esc(err.message) + ' Their photos and videos are moved to the Google Drive trash.',
         [{ label: 'Delete task and submissions', value: true, kind: 'danger' }])) return;
-      await api('/api/admin/tasks/' + id + '?force=1', { method: 'DELETE' });
+      await api('/api/admin/tasks/' + t.id + '?force=1', { method: 'DELETE' });
     }
-    viewTasks();
+    toast('Task deleted'); viewTasks();
+  });
+}
+
+// Task editor (create or edit) with submission requirements and a live player preview.
+function editTask(task) {
+  const t = task || { title: '', description: '', points: 10, min_photos: 1, min_videos: 0, needs_link: 0, link_label: '' };
+  const el = document.createElement('div');
+  el.className = 'dlg-scrim';
+  el.innerHTML = `
+    <form class="dlg card tedit" autocomplete="off">
+      <div class="tedit-hd"><h3>${task ? 'Edit task' : 'New task'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+      <label class="fl">Title<input class="input" name="title" maxlength="120" required value="${esc(t.title)}" placeholder="e.g. Local train selfie"></label>
+      <label class="fl">Description / rules<textarea class="input" name="description" maxlength="1000" rows="3" placeholder="What should players do?">${esc(t.description)}</textarea></label>
+      <label class="fl pts-f">Points<input class="input" name="points" type="number" min="0" max="10000" value="${t.points}"></label>
+      <fieldset class="reqset">
+        <legend>What players must submit</legend>
+        <div class="stepper"><span>📷 Photos required</span><div><button type="button" data-step="min_photos" data-d="-1">−</button><input name="min_photos" type="number" min="0" max="12" value="${t.min_photos}"><button type="button" data-step="min_photos" data-d="1">+</button></div></div>
+        <div class="stepper"><span>🎥 Videos required</span><div><button type="button" data-step="min_videos" data-d="-1">−</button><input name="min_videos" type="number" min="0" max="5" value="${t.min_videos}"><button type="button" data-step="min_videos" data-d="1">+</button></div></div>
+        <label class="toggle-row"><span>🔗 Link required</span><span class="switch"><input type="checkbox" name="needs_link" ${t.needs_link ? 'checked' : ''}><span></span></span></label>
+        <label class="fl link-label ${t.needs_link ? '' : 'hidden'}">Link label (shown to players)<input class="input" name="link_label" maxlength="60" value="${esc(t.link_label)}" placeholder="e.g. Instagram reel link"></label>
+        <p class="muted small hint">Players can't send until every requirement is met. Set everything to 0 with no link to allow "at least 1 photo or video" (the old rule).</p>
+      </fieldset>
+      <div class="preview"><span class="muted small">Players will see</span><div id="tprev"></div></div>
+      <div class="dlg-actions"><button type="button" class="btn sm ghost" data-close>Cancel</button><button class="btn sm blue">${task ? 'Save changes' : 'Add task'}</button></div>
+    </form>`;
+  document.body.appendChild(el);
+  const f = el.querySelector('form');
+  const val = () => {
+    const d = Object.fromEntries(new FormData(f));
+    return { ...d, points: +d.points || 0, min_photos: Math.max(0, Math.min(12, +d.min_photos || 0)), min_videos: Math.max(0, Math.min(5, +d.min_videos || 0)), needs_link: f.needs_link.checked ? 1 : 0 };
   };
-  $('#newTask').onsubmit = async e => {
+  const preview = () => {
+    const v = val();
+    f.querySelector('.link-label').classList.toggle('hidden', !v.needs_link);
+    f.querySelector('#tprev').innerHTML = `<div class="ttop"><b>${esc(v.title || 'Untitled task')}</b><span class="pill pts">+${v.points}</span></div><div class="treq">${reqPills(v)}</div>`;
+  };
+  f.oninput = preview;
+  f.onclick = e => {
+    const st = e.target.closest('[data-step]');
+    if (st) { const inp = f[st.dataset.step]; inp.value = Math.max(+inp.min, Math.min(+inp.max, (+inp.value || 0) + +st.dataset.d)); preview(); }
+    if (e.target.closest('[data-close]')) el.remove();
+  };
+  el.onclick = e => { if (e.target === el) el.remove(); };
+  f.onsubmit = async e => {
     e.preventDefault();
-    try { await api('/api/admin/tasks', { method: 'POST', body: JSON.stringify(fd(e.target)) }); toast('Task added'); viewTasks(); }
-    catch (err) { toast('Error', err.message, 'rejected'); }
+    const v = val();
+    if (!v.title.trim()) return f.title.focus();
+    try {
+      await api(task ? '/api/admin/tasks/' + task.id : '/api/admin/tasks', { method: task ? 'PUT' : 'POST', body: JSON.stringify(v) });
+      el.remove(); toast(task ? 'Task saved' : 'Task added'); viewTasks();
+    } catch (err) { toast('Error', err.message, 'rejected'); }
   };
+  preview();
+  f.title.focus();
 }
 
 // ---------- Settings ----------

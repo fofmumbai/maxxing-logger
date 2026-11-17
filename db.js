@@ -78,6 +78,16 @@ for (const [col, def] of [['drive_id', 'TEXT'], ['drive_error', 'TEXT'], ['drive
 }
 db.exec(`CREATE TABLE IF NOT EXISTS drive_folders (key TEXT PRIMARY KEY, id TEXT NOT NULL)`);
 
+// What each task asks players to submit (all zero = legacy rule: at least one photo or video).
+{
+  const cols = db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name);
+  for (const [col, def] of [['min_photos', 'INTEGER NOT NULL DEFAULT 0'], ['min_videos', 'INTEGER NOT NULL DEFAULT 0'], ['needs_link', 'INTEGER NOT NULL DEFAULT 0'], ['link_label', "TEXT NOT NULL DEFAULT ''"]]) {
+    if (!cols.includes(col)) db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`);
+  }
+  const scols = db.prepare('PRAGMA table_info(submissions)').all().map(c => c.name);
+  if (!scols.includes('link')) db.exec("ALTER TABLE submissions ADD COLUMN link TEXT NOT NULL DEFAULT ''");
+}
+
 // Capture details sent by the phone: when it was taken and where (GPS), plus when the server received it.
 const CAPTURE_COLS = [['captured_at', 'INTEGER'], ['lat', 'REAL'], ['lng', 'REAL'], ['accuracy', 'REAL'], ['uploaded_at', 'INTEGER']];
 for (const table of ['uploads', 'media']) {
