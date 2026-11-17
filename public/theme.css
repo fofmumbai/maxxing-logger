@@ -111,30 +111,23 @@ body { background: var(--yellow); color: var(--ink); }
 #join { align-content: start; gap: 18px; padding-top: calc(18px + var(--safe-t)); }
 #join .stamp { padding: 18px; }
 #join .poster { display: block; width: 100%; height: auto; }
-.join-card { padding: 20px; display: grid; gap: 14px; margin-top: -4px; }
-.join-card .intro { margin: 0; font-size: 15px; }
-.join-card .intro + .small { margin: -6px 0 0; color: #5a4a12; }
 #codeInput { background: var(--cream); }
 .strip { display: block; width: 100%; height: auto; border-radius: 6px; }
 
-/* Join button styled as the poster's truck-art banner: green frame, marigold band of magenta dots, cream panel. */
-.truck-btn {
-  display: block; width: 100%; cursor: pointer; font: inherit; color: var(--red);
-  padding: 9px; border: 3px solid var(--truck-green); border-radius: 8px;
+/* Join form framed like the poster's truck-art banner:
+   green frame, marigold band of magenta dots, cream panel with an inner green rule. */
+.truck-frame {
+  padding: 10px; border: 3px solid var(--truck-green); border-radius: 10px;
   background:
     linear-gradient(var(--cream), var(--cream)) content-box,
     radial-gradient(circle, var(--magenta) 2.4px, transparent 3px) 0 0 / 12px 12px,
     var(--truck-yellow);
   box-shadow: var(--hard);
-  transition: transform .06s ease, box-shadow .06s ease;
 }
-.truck-btn span {
-  display: block; padding: 14px 12px; border: 2px solid var(--truck-green);
-  font-weight: 700; font-size: 22px; letter-spacing: -0.01em; text-transform: uppercase; line-height: 1.1;
-}
-.truck-btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
-.truck-btn:disabled { opacity: .6; cursor: wait; }
-.truck-btn:focus-visible { outline: 3px solid var(--wf-blue); outline-offset: 3px; }
+.truck-frame .panel { border: 2px solid var(--truck-green); padding: 18px 16px; display: grid; gap: 14px; }
+.truck-frame .intro { margin: 0; font-size: 15px; }
+.truck-frame .intro + .small { margin: -6px 0 0; color: #5a4a12; }
+.truck-cta { background: var(--red); color: #fff; font-size: 19px; text-transform: uppercase; letter-spacing: .01em; min-height: 56px; }
 .tagline { text-align: center; margin: 0; color: #5a4a12; font-size: 13px; }
 
 /* Header */

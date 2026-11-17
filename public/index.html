@@ -227,7 +227,8 @@
       <h1 class="sr-only">Mumbai Maxxing · Wireframed 2026</h1>
       <img class="poster" src="/img/theme/poster-hero.jpg" width="922" height="947" alt="Wireframed 2026: Mumbai Maxxing. An illustrated Mumbai auto-rickshaw with CST station, a local train, the metro, vada pav, cutting chai and the Sea Link.">
     </div>
-    <form id="joinForm" class="card join-card">
+    <form id="joinForm" class="truck-frame">
+      <div class="panel">
       <p class="intro"><b>Join your team</b> with the room code from your organiser. Max 4 members per team.</p>
       <p class="small">📍 Photos and videos you send record when and where they were taken, so organisers can verify tasks.</p>
       <div class="field">
@@ -239,8 +240,9 @@
         <input id="nameInput" class="input" autocomplete="given-name" maxlength="40" placeholder="e.g. Priya" required>
       </div>
       <div id="joinErr" class="err hidden"></div>
+      <button class="btn truck-cta block" id="joinBtn" type="submit">Join team →</button>
+      </div>
     </form>
-    <button class="truck-btn" id="joinBtn" type="submit" form="joinForm"><span>Join team →</span></button>
     <p class="tagline">Friends of Figma Mumbai · Creativity. Collaboration. Continuous Learning.</p>
   </section>
 
