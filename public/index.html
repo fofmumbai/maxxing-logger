@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Mumbai Maxxing</title>
   <meta name="description" content="Mumbai Maxxing task logger by Friends of Figma Mumbai">
-  <meta name="theme-color" content="#F5F5F5">
+  <meta name="theme-color" content="#FFC60B">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,6 +14,7 @@
   <link rel="icon" href="/img/logo.png">
   <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
   <link rel="preload" href="/fonts/Figma-Sans-Text-Bold.otf" as="font" type="font/otf" crossorigin>
+  <link rel="preload" href="/img/theme/poster-hero.jpg" as="image">
   <link rel="stylesheet" href="/style.css">
   <style>
     .wrap { max-width: 560px; margin: 0 auto; padding: 0 16px; }
@@ -214,25 +215,21 @@
     .linkbtn { border: 0; background: none; color: var(--muted); text-decoration: underline; font-size: 14px; cursor: pointer; padding: 12px; justify-self: center; }
     .lb .name { flex: 1; font-weight: 700; }
   </style>
+  <link rel="stylesheet" href="/theme.css">
 </head>
 <body>
   <div id="toasts"></div>
 
   <!-- JOIN -->
   <section id="join" class="wrap hidden">
-    <svg class="shapes" viewBox="0 0 260 300" aria-hidden="true">
-      <path d="M150 -10h140v150a70 70 0 0 1-140 0z" fill="#FF7676"/>
-      <rect x="120" y="150" width="120" height="120" rx="14" transform="rotate(-18 180 210)" fill="#24CB71"/>
-      <circle cx="96" cy="60" r="34" fill="#4D49FC"/>
-      <circle cx="228" cy="262" r="20" fill="#E4FF97"/>
-    </svg>
-    <img class="logo" src="/img/logo.png" alt="Friends of Figma Mumbai">
-    <div class="hero">
-      <h1>Mumbai <span class="hl">Maxxing</span></h1>
-      <p>Join your team with the room code from your organiser. Max 4 members per team.</p>
-      <p class="small" style="margin-top:8px">📍 Photos and videos you send record when and where they were taken, so organisers can verify tasks.</p>
+    <div class="fof-lockup" aria-label="Friends of Figma Mumbai"><span class="l1">Friends</span><span class="l2">of</span><span class="l3">Figma</span><span class="l4">Mumbai</span></div>
+    <div class="stamp grid-paper">
+      <h1 class="sr-only">Mumbai Maxxing · Wireframed 2026</h1>
+      <img class="poster" src="/img/theme/poster-hero.jpg" width="922" height="947" alt="Wireframed 2026: Mumbai Maxxing. An illustrated Mumbai auto-rickshaw with CST station, a local train, the metro, vada pav, cutting chai and the Sea Link.">
     </div>
-    <form id="joinForm" class="card" style="padding:20px; display:grid; gap:14px;">
+    <form id="joinForm" class="card join-card">
+      <p class="intro"><b>Join your team</b> with the room code from your organiser. Max 4 members per team.</p>
+      <p class="small">📍 Photos and videos you send record when and where they were taken, so organisers can verify tasks.</p>
       <div class="field">
         <label for="codeInput">Room code</label>
         <input id="codeInput" class="input" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8" placeholder="ABC123" required>
@@ -242,9 +239,10 @@
         <input id="nameInput" class="input" autocomplete="given-name" maxlength="40" placeholder="e.g. Priya" required>
       </div>
       <div id="joinErr" class="err hidden"></div>
-      <button class="btn blue block" type="submit">Join team</button>
+      <button class="btn blue block" type="submit">Join team →</button>
     </form>
-    <p class="muted small" style="text-align:center; margin:0">Friends of Figma Mumbai · Creativity. Collaboration. Continuous Learning.</p>
+    <img class="strip" src="/img/theme/strip.jpg" width="959" height="203" alt="Presented with DevX and IndiRepair · 12 Dec 2026, 10 AM to 7 PM">
+    <p class="tagline">Friends of Figma Mumbai · Creativity. Collaboration. Continuous Learning.</p>
   </section>
 
   <!-- PERMISSIONS -->
@@ -255,9 +253,9 @@
     <header class="top">
       <div class="wrap">
         <div class="row">
-          <img class="logo" src="/img/logo.png" alt="FoF Mumbai">
+          <img class="wordmark" src="/img/theme/wordmark.png" width="1040" height="374" alt="Mumbai Maxxing">
           <div class="team">
-            <span class="muted small">Mumbai Maxxing</span>
+            <span class="muted small">Your team</span>
             <b id="teamName">—</b>
           </div>
           <div class="score"><b id="teamPoints">0</b><span class="muted small">points</span></div>
@@ -269,9 +267,9 @@
 
     <main class="wrap">
       <div id="tab-tasks"><div id="taskList" class="tasks"></div></div>
-      <div id="tab-updates" class="hidden"><h2 class="section-title">Updates</h2><div id="updateList" class="tasks"></div></div>
-      <div id="tab-team" class="hidden"><h2 class="section-title">Your team</h2><div id="teamView" style="display:grid; gap:12px"></div></div>
-      <div id="tab-board" class="hidden"><h2 class="section-title">Leaderboard</h2><div id="boardList" class="tasks"></div></div>
+      <div id="tab-updates" class="hidden"><h2 class="section-title"><span class="sticker">Updates</span></h2><div id="updateList" class="tasks"></div></div>
+      <div id="tab-team" class="hidden"><h2 class="section-title"><span class="sticker green">Your team</span></h2><div id="teamView" style="display:grid; gap:12px"></div></div>
+      <div id="tab-board" class="hidden"><h2 class="section-title"><span class="sticker pink">Leaderboard</span></h2><div id="boardList" class="tasks"></div></div>
     </main>
 
     <nav class="bottom">

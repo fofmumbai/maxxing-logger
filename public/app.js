@@ -629,8 +629,9 @@ function showDone(taskId, items) {
   el.className = 'done-pop';
   el.innerHTML = `
     <div class="done-card" role="alertdialog" aria-label="Submitted">
+      <div class="truck-band" aria-hidden="true"></div>
       <div class="done-check">✓</div>
-      <h2>Submitted!</h2>
+      <h2 class="sticker green">Submitted!</h2>
       <p><b>${esc(t ? t.title : 'Task')}</b> · ${items} item${items > 1 ? 's' : ''} uploaded.<br>Organisers will review it soon, and you'll get a notification here.</p>
       <button class="btn block" id="doneOk">Back to tasks</button>
     </div>`;
@@ -737,7 +738,7 @@ function renderPerms() {
   const camOk = perm.cam === 'granted';
   const allDone = ['cam', 'geo', 'notif'].every(k => perm[k] !== 'prompt' && perm[k] !== 'unknown');
   $('#perms').innerHTML = `
-    <div class="pr-hero"><h1>Get your phone <span class="hl">ready</span></h1>
+    <div class="pr-hero"><h1>Get your phone <span class="sticker pink">ready</span></h1>
       <p class="muted">Allow these once now, so nothing interrupts you mid-task.</p></div>
     <div class="card pr-list">
       ${permRow('cam', 'Camera & microphone', 'To take photos and record videos for tasks.', true)}

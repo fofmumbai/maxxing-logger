@@ -1,0 +1,223 @@
+/* ==========================================================================
+   Mumbai Maxxing event theme: "Wireframed 2026" poster
+   Loaded last on every page, so it overrides the base FoF styles.
+   Motifs: marigold yellow, cream graph paper, postage-stamp edges,
+   Figma selection-handle stickers, truck-art bands, hard ink shadows.
+   ========================================================================== */
+:root {
+  --yellow: #FFC60B;
+  --cream: #FFF5CF;
+  --gridc: rgba(30, 30, 30, .07);
+  --wf-green: #089B54;
+  --wf-blue: #1545BB;
+  --wf-pink: #FC3B77;
+  --hill: #5BA55F;
+  --hill-dark: #3E7B43;
+  --truck-yellow: #FFD217;
+  --truck-green: #128744;
+  --magenta: #DA2863;
+  --red: #EF3228;
+  --ink: #111111;
+
+  /* Re-point the base tokens at the poster palette */
+  --blue: var(--wf-blue);
+  --green: var(--wf-green);
+  --coral: var(--wf-pink);
+  --lime: var(--yellow);
+  --paper: var(--cream);
+  --line: rgba(17, 17, 17, .16);
+  --hard: 3px 3px 0 var(--ink);
+}
+
+/* ---------- Shared building blocks ---------- */
+.grid-paper {
+  background-color: var(--cream);
+  background-image: linear-gradient(var(--gridc) 1px, transparent 1px), linear-gradient(90deg, var(--gridc) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Postage-stamp edge: bites taken out of every side, like the poster frame. */
+.stamp {
+  --r: 9px;
+  padding: calc(2 * var(--r));
+  background: var(--cream);
+  -webkit-mask:
+    radial-gradient(var(--r), #0000 98%, #000) round calc(-1.5 * var(--r)) calc(-1.5 * var(--r)) / calc(3 * var(--r)) calc(3 * var(--r)),
+    linear-gradient(#000 0 0) no-repeat 50% / calc(100% - 3 * var(--r)) calc(100% - 3 * var(--r));
+  mask:
+    radial-gradient(var(--r), #0000 98%, #000) round calc(-1.5 * var(--r)) calc(-1.5 * var(--r)) / calc(3 * var(--r)) calc(3 * var(--r)),
+    linear-gradient(#000 0 0) no-repeat 50% / calc(100% - 3 * var(--r)) calc(100% - 3 * var(--r));
+}
+
+/* Figma-selection sticker: tilted colour block with resize handles at the corners. */
+.sticker {
+  position: relative; display: inline-block; justify-self: start;
+  background: var(--wf-blue); color: #fff;
+  font-weight: 700; letter-spacing: -0.01em; line-height: 1.05;
+  padding: .12em .36em .16em; transform: rotate(-1.5deg);
+}
+.sticker::before {
+  content: ''; position: absolute; inset: -4px; pointer-events: none;
+  background:
+    linear-gradient(#fff 0 0) 1.5px 1.5px / 5px 5px no-repeat, linear-gradient(#222 0 0) 0 0 / 8px 8px no-repeat,
+    linear-gradient(#fff 0 0) calc(100% - 1.5px) 1.5px / 5px 5px no-repeat, linear-gradient(#222 0 0) 100% 0 / 8px 8px no-repeat,
+    linear-gradient(#fff 0 0) 1.5px calc(100% - 1.5px) / 5px 5px no-repeat, linear-gradient(#222 0 0) 0 100% / 8px 8px no-repeat,
+    linear-gradient(#fff 0 0) calc(100% - 1.5px) calc(100% - 1.5px) / 5px 5px no-repeat, linear-gradient(#222 0 0) 100% 100% / 8px 8px no-repeat;
+}
+.sticker.green { background: var(--wf-green); transform: rotate(-3deg); }
+.sticker.pink { background: var(--wf-pink); transform: rotate(2deg); }
+.sticker.ink { background: var(--ink); color: var(--yellow); }
+
+/* Truck-art band: green rule, marigold field, magenta dots. */
+.truck-band {
+  height: 14px;
+  background:
+    radial-gradient(circle, var(--magenta) 2.6px, transparent 3.2px) 0 50% / 14px 14px repeat-x,
+    var(--truck-yellow);
+  box-shadow: inset 0 2px 0 var(--truck-green), inset 0 -2px 0 var(--truck-green);
+}
+
+/* Friends of Figma lockup as on the poster: black pills + blue "Mumbai" block. */
+.fof-lockup { display: inline-flex; align-items: stretch; font-size: 15px; line-height: 1; justify-self: center; }
+.fof-lockup span { display: inline-flex; align-items: center; padding: 7px 11px; background: var(--ink); color: #fff; }
+.fof-lockup .l1 { border-radius: 999px 0 0 999px; padding-left: 14px; }
+.fof-lockup .l2 { border-radius: 999px; margin: 0 -3px; position: relative; z-index: 1; box-shadow: 0 0 0 0 var(--ink); padding: 7px 9px; }
+.fof-lockup .l3 { border-radius: 0 999px 999px 0; padding-right: 14px; }
+.fof-lockup .l4 { background: #4D49FC; margin-left: 6px; padding: 7px 12px; }
+
+/* ---------- Base element re-skin ---------- */
+body { background: var(--yellow); color: var(--ink); }
+.card { background: var(--cream); border: 2px solid var(--ink); box-shadow: var(--hard); }
+.btn { border: 2px solid var(--ink); box-shadow: var(--hard); transition: transform .06s ease, box-shadow .06s ease; }
+.btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.btn.ghost { background: var(--cream); box-shadow: var(--hard); }
+.btn.lime { background: var(--yellow); color: var(--ink); }
+.btn.green { color: #fff; }
+.btn.coral { color: #fff; }
+.btn:disabled { box-shadow: none; }
+.input, textarea.input, select.input { background-color: #fff; border: 2px solid var(--ink); }
+.input:focus { border-color: var(--wf-blue); box-shadow: 0 0 0 3px rgba(21, 69, 187, .22); }
+.pts { background: var(--wf-blue); }
+.pill.st-todo { background: var(--cream); box-shadow: inset 0 0 0 1.5px var(--line); }
+.toast { border: 2px solid var(--ink); box-shadow: var(--hard); }
+.toast.approved { background: var(--wf-green); color: #fff; }
+.toast.rejected { background: var(--wf-pink); color: #fff; }
+
+/* ==========================================================================
+   Player app
+   ========================================================================== */
+
+/* Join screen */
+#join { align-content: start; gap: 18px; padding-top: calc(18px + var(--safe-t)); }
+#join .stamp { padding: 18px; }
+#join .poster { display: block; width: 100%; height: auto; }
+.join-card { padding: 20px; display: grid; gap: 14px; margin-top: -4px; }
+.join-card .intro { margin: 0; font-size: 15px; }
+.join-card .intro + .small { margin: -6px 0 0; color: #5a4a12; }
+#codeInput { background: var(--cream); }
+.strip { display: block; width: 100%; height: auto; border-radius: 6px; }
+.tagline { text-align: center; margin: 0; color: #5a4a12; font-size: 13px; }
+
+/* Header */
+header.top { background: rgba(255, 198, 11, .94); }
+header.top .wordmark { height: 36px; width: auto; flex: none; }
+header.top .team .muted { color: #6b5410; }
+.score b { font-size: 30px; }
+.score .muted { color: #6b5410; }
+.progress { background: var(--cream); box-shadow: inset 0 0 0 2px var(--ink); height: 12px; }
+.progress i { background: var(--wf-green); border-right: 2px solid var(--ink); }
+.prog-row .muted { color: #6b5410; }
+.chip { background: var(--cream); box-shadow: inset 0 0 0 2px var(--ink); color: var(--ink); }
+.chip.on { background: var(--ink); color: var(--yellow); }
+.chip .n { opacity: .65; }
+
+/* Task rows */
+.task { border-radius: 14px; }
+.task.approved { background: #E3F3DF; }
+.task.approved h3 { color: #2c5a33; }
+.task.approved .pts { background: var(--wf-green); color: #fff; }
+.task:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.ic.todo { box-shadow: inset 0 0 0 2px rgba(17, 17, 17, .35); }
+.ic.pending { background: #FFE2B8; }
+.ic.rejected { background: var(--wf-pink); color: #fff; }
+.task .sub.pending { color: #8a4b00; }
+.empty { color: #5a4a12; }
+
+/* Section titles become stickers */
+.section-title { display: block; padding: 18px 0 14px; }
+.section-title > span { font-size: 26px; }
+
+/* Bottom nav */
+nav.bottom { background: linear-gradient(to top, var(--yellow) 70%, rgba(255, 198, 11, 0)); }
+nav.bottom .bar { border: 2px solid var(--ink); box-shadow: var(--hard); }
+nav.bottom button.on { background: var(--yellow); color: var(--ink); }
+nav.bottom .dot { background: var(--wf-pink); color: #fff; }
+
+/* Task sheet */
+.sheet { border-top: 2px solid var(--ink); }
+.sheet .inner > h2 { justify-self: start; }
+.x-btn { background: var(--cream); border: 2px solid var(--ink); }
+.capture .btn { box-shadow: var(--hard); }
+.capture .btn.blue { background: var(--wf-pink); color: #fff; }
+.thumb { border: 2px solid var(--ink); }
+.feedback { border: 2px solid var(--ink); }
+.feedback.approved { background: #D3F0D2; color: #0b5a2f; }
+.feedback.rejected { background: #FFD6E3; color: #8a0f3a; }
+.feedback.pending { background: #FFE9B8; color: #6b3d00; }
+#sendBtn .upbar { background: rgba(17, 17, 17, .15); }
+
+/* Updates, team, leaderboard */
+.update.unread .meta b::before { background: var(--wf-pink); }
+.codebox { background: var(--ink); color: var(--yellow); }
+.lb.me { background: #fff; outline: 3px solid var(--wf-blue); outline-offset: -1px; }
+.lb:nth-child(1) .rank { background: var(--yellow); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
+.lb:nth-child(2) .rank { background: var(--wf-blue); color: #fff; }
+.lb:nth-child(3) .rank { background: var(--wf-pink); color: #fff; }
+.avatar { box-shadow: inset 0 0 0 2px var(--ink); }
+.perm-link { background: var(--cream); }
+
+/* Permission setup */
+#perms { align-content: start; padding-top: calc(28px + var(--safe-t)); }
+.pr-hero h1 .hl { background: none; }
+.pr-ic { background: #fff; box-shadow: inset 0 0 0 2px var(--ink); }
+.pr-help { background: #FFF0C2; color: #5a3c00; border: 1.5px solid rgba(17, 17, 17, .2); }
+
+/* Camera */
+.cam-modes button.on { background: var(--yellow); }
+.cam-done { background: var(--yellow); border: 2px solid var(--ink); }
+.cam.video .shutter span { background: var(--wf-pink); }
+
+/* Popups */
+.dlg, .done-card { background: var(--cream); border: 2px solid var(--ink); box-shadow: 5px 5px 0 var(--ink); }
+.done-card { padding-top: 0; overflow: hidden; }
+.done-card .truck-band { margin: 0 -22px 14px; justify-self: stretch; height: 16px; }
+.done-check { background: var(--wf-green); color: #fff; box-shadow: 0 0 0 8px var(--yellow), 0 0 0 10px var(--ink); }
+
+/* ==========================================================================
+   Organiser dashboard
+   ========================================================================== */
+body.admin { background-color: var(--cream); background-image: linear-gradient(var(--gridc) 1px, transparent 1px), linear-gradient(90deg, var(--gridc) 1px, transparent 1px); background-size: 24px 24px; }
+body.admin .card { background: #fff; }
+body.admin header.top { background: var(--yellow); color: var(--ink); border-bottom: 2px solid var(--ink); }
+body.admin header.top .wm { height: 40px; width: auto; background: none; padding: 0; border-radius: 0; }
+body.admin header.top h1 { color: var(--ink); }
+body.admin header.top h1 span, body.admin header.top h1 .role { color: #6b5410; }
+body.admin .tabs { background: var(--ink); border: 2px solid var(--ink); }
+body.admin .tabs a { color: #d9d9d9; }
+body.admin .tabs a.on { background: var(--yellow); color: var(--ink); }
+body.admin .badge { background: var(--wf-pink); color: #fff; }
+body.admin .tcard.has-pending { border-color: var(--wf-pink); }
+body.admin .review-tag { background: var(--wf-pink); color: #fff; border: 2px solid var(--ink); }
+body.admin .seg { background: #fff; box-shadow: inset 0 0 0 2px var(--ink); }
+body.admin .seg button.on { background: var(--ink); color: var(--yellow); }
+body.admin .bar { background: var(--cream); box-shadow: inset 0 0 0 1.5px var(--line); }
+body.admin .bar i { background: var(--wf-green); }
+body.admin .trow.st-pending-row { box-shadow: inset 5px 0 0 var(--wf-pink), var(--hard); }
+body.admin .lbrow:nth-child(1) .rank { background: var(--yellow); box-shadow: inset 0 0 0 2px var(--ink); }
+body.admin .lbrow:nth-child(2) .rank { background: var(--wf-blue); color: #fff; }
+body.admin .lbrow:nth-child(3) .rank { background: var(--wf-pink); color: #fff; }
+body.admin .switch input:checked + span { background: var(--wf-green); }
+body.admin #login .wm { width: 220px; height: auto; }
+body.admin .sub .team { color: var(--wf-blue); }
+body.admin .mchip { background: var(--cream); }
+body.admin .media .m { border: 2px solid var(--ink); }
