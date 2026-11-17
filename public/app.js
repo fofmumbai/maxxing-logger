@@ -72,7 +72,7 @@ $('#filterChips').addEventListener('scroll', updateChipFade, { passive: true });
 $('#codeInput').value = new URLSearchParams(location.search).get('code') || '';
 $('#joinForm').onsubmit = async e => {
   e.preventDefault();
-  const btn = e.target.querySelector('button');
+  const btn = $('#joinBtn');
   btn.disabled = true;
   $('#joinErr').classList.add('hidden');
   try {
