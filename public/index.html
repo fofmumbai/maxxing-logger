@@ -267,7 +267,13 @@
     </header>
 
     <main class="wrap">
-      <div id="tab-tasks"><div id="taskList" class="tasks"></div></div>
+      <div id="tab-tasks">
+        <div class="sort-row" role="group" aria-label="Sort tasks">
+          <span>Sort by</span>
+          <div class="sort-seg"><button type="button" data-sort="num">Task #</button><button type="button" data-sort="points">Points</button></div>
+        </div>
+        <div id="taskList" class="tasks"></div>
+      </div>
       <div id="tab-updates" class="hidden"><h2 class="section-title"><span class="sticker">Updates</span></h2><div id="updateList" class="tasks"></div></div>
       <div id="tab-team" class="hidden"><h2 class="section-title"><span class="sticker green">Your team</span></h2><div id="teamView" style="display:grid; gap:12px"></div></div>
       <div id="tab-board" class="hidden"><h2 class="section-title"><span class="sticker pink">Leaderboard</span></h2><div id="boardList" class="tasks"></div></div>
