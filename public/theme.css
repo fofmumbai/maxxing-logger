@@ -202,6 +202,7 @@ nav.bottom .dot { background: var(--wf-pink); color: #fff; }
 /* Popups */
 .dlg, .done-card { background: var(--cream); border: 2px solid var(--ink); box-shadow: 5px 5px 0 var(--ink); }
 .done-card { padding-top: 0; overflow: hidden; }
+.done-card .sticker { justify-self: center; margin-top: 4px; }
 .done-card .truck-band { margin: 0 -22px 14px; justify-self: stretch; height: 16px; }
 .done-check { background: var(--wf-green); color: #fff; box-shadow: 0 0 0 8px var(--yellow), 0 0 0 10px var(--ink); }
 
