@@ -467,7 +467,8 @@ app.get('/api/admin/teams/:id', adminAuth, (req, res) => {
   st.team.rejected = db.prepare(`SELECT COUNT(*) n FROM submissions WHERE team_id = ? AND status = 'rejected'`).get(id).n;
   res.json(st);
 });
-app.get('/api/admin/leaderboard', adminAuth, (req, res) => res.json(leaderboard()));
+app.get('/api/admin/leaderboard', adminAuth, (req, res) =>
+  res.json(req.admin.super ? leaderboard() : leaderboard().map(({ id, name, points }) => ({ id, name, points }))));
 
 app.post('/api/admin/teams', adminAuth, superOnly, (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM teams').get().n;

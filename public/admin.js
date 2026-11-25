@@ -390,7 +390,7 @@ async function viewBoard() {
   paint(`<div class="toolbar"><h2>Leaderboard</h2></div>
     <div class="card">${rows.map((r, i) => `
       <a class="lbrow" ${isSuper() || me.teamIds.includes(r.id) ? `href="#/team/${r.id}"` : ''} style="${i ? 'border-top:1px solid var(--line)' : ''}"><span class="rank">${i + 1}</span><span class="name">${esc(r.name)}</span>
-      <span class="muted small">${r.approved} approved · ${r.pending} to review</span><span class="pill pts" style="font-size:16px">${r.points}</span></a>`).join('')}</div>`);
+      ${isSuper() ? `<span class="muted small">${r.approved} approved · ${r.pending} to review</span>` : ''}<span class="pill pts" style="font-size:16px">${r.points}</span></a>`).join('')}</div>`);
 }
 
 // ---------- Tasks editor ----------
