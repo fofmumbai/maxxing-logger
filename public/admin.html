@@ -220,6 +220,22 @@
     .switch input:checked + span { background: var(--blue); }
     .switch input:checked + span::before { transform: translateX(22px); }
 
+    /* Admins (reviewer accounts) */
+    body.reviewer [data-super] { display: none !important; }
+    .alist { display: grid; gap: 10px; }
+    .aitem { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 14px 16px; }
+    .aitem .who { display: grid; gap: 6px; min-width: 0; }
+    .aitem .uname { font-size: 13px; color: var(--muted); font-weight: 700; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    @media (max-width: 760px) { .aitem { grid-template-columns: 1fr; } }
+    .teampick { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: 260px; overflow-y: auto; padding: 2px; }
+    .teampick label { display: flex; align-items: center; gap: 8px; font-weight: 400; font-size: 14px; background: var(--paper); border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+    .teampick label.taken span { color: var(--muted); }
+    .teampick input { width: 18px; height: 18px; accent-color: var(--blue); flex: none; }
+    .pw-row { display: flex; gap: 8px; }
+    .pw-row .input { flex: 1; }
+    .reviewers-line { font-size: 12px; color: var(--muted); }
+
     #printSheet { display: none; }
     @media print {
       body > *:not(#printSheet) { display: none !important; }
@@ -238,7 +254,8 @@
       <img class="wm" src="/img/theme/wordmark.png" alt="Mumbai Maxxing">
       <h2 style="font-size:28px">Organiser login</h2>
       <p class="muted" style="margin:0">Mumbai Maxxing review dashboard</p>
-      <input id="pw" class="input" type="password" placeholder="Admin password" autocomplete="current-password" required>
+      <input id="user" class="input" type="text" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <input id="pw" class="input" type="password" placeholder="Password" autocomplete="current-password" required>
       <div id="loginErr" class="small" style="color:var(--maroon)"></div>
       <button class="btn blue block">Log in</button>
     </form>
@@ -248,12 +265,13 @@
     <header class="top">
       <div class="wrap row">
         <img class="wm" src="/img/theme/wordmark.png" alt="Mumbai Maxxing">
-        <h1><span class="role">Organiser</span><span class="live" id="live" title="Live updates"></span></h1>
+        <h1><span class="role" id="roleLabel">Organiser</span><span class="live" id="live" title="Live updates"></span></h1>
         <nav class="tabs">
           <a href="#/teams" data-tab="teams">Teams</a>
           <a href="#/queue" data-tab="queue">Review<span class="long"> queue</span><span class="badge" id="pendingBadge"></span></a>
           <a href="#/board" data-tab="board"><span class="long">Leaderboard</span><span class="short">Board</span></a>
-          <a href="#/tasks" data-tab="tasks">Tasks</a>
+          <a href="#/tasks" data-tab="tasks" data-super>Tasks</a>
+          <a href="#/admins" data-tab="admins" data-super>Admins</a>
           <a href="#/settings" data-tab="settings">Settings</a>
         </nav>
       </div>

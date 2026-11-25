@@ -12,6 +12,8 @@ const AV = ['var(--lime)', 'var(--coral)', 'var(--green)', '#C9C8FF'];
 const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>';
 
 let token = store.get('mm_admin');
+let me = null; // { super, id, name, username, teamIds }
+const isSuper = () => !!me?.super;
 let es = null;
 let route = { name: 'teams' };
 let teamSort = store.get('mm_sort') || 'pending';
@@ -62,7 +64,7 @@ $('#loginForm').onsubmit = async e => {
   e.preventDefault();
   $('#loginErr').textContent = '';
   try {
-    const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#pw').value }) });
+    const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: $('#user').value, password: $('#pw').value }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     token = d.token; store.set('mm_admin', token);
@@ -70,7 +72,10 @@ $('#loginForm').onsubmit = async e => {
   } catch (err) { $('#loginErr').textContent = err.message; }
 };
 function logout() {
-  token = null; store.del('mm_admin'); es?.close();
+  token = null; me = null; store.del('mm_admin'); es?.close();
+  teamsCache = []; tasksCache = [];
+  document.body.classList.remove('reviewer');
+  $('#pw').value = '';
   $('#dash').classList.add('hidden'); $('#login').classList.remove('hidden');
 }
 
@@ -79,13 +84,14 @@ function parseRoute() {
   const h = location.hash.replace(/^#\/?/, '');
   const [name, id] = h.split('/');
   if (name === 'team' && id) return { name: 'team', id: +id };
-  return { name: ['teams', 'queue', 'board', 'tasks', 'settings'].includes(name) ? name : 'teams' };
+  const allowed = isSuper() ? ['teams', 'queue', 'board', 'tasks', 'admins', 'settings'] : ['teams', 'queue', 'board', 'settings'];
+  return { name: allowed.includes(name) ? name : 'teams' };
 }
 window.addEventListener('hashchange', () => { route = parseRoute(); window.scrollTo(0, 0); render(); });
 function render() {
   const tab = route.name === 'team' ? 'teams' : route.name;
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
-  ({ teams: viewTeams, team: () => viewTeam(route.id), queue: viewQueue, board: viewBoard, tasks: viewTasks, settings: viewSettings })[route.name]()
+  ({ teams: viewTeams, team: () => viewTeam(route.id), queue: viewQueue, board: viewBoard, tasks: viewTasks, admins: viewAdmins, settings: viewSettings })[route.name]()
     .catch(err => err.message !== 'Logged out' && paint(`<div class="empty">${esc(err.message)}</div>`));
   loadSummary();
 }
@@ -138,7 +144,7 @@ function mediaTile(m) {
   const cap = JSON.stringify({ t: m.capturedAt || null, u: m.uploadedAt || null, lat: m.lat, lng: m.lng, acc: m.accuracy });
   return `<div class="m" data-view="${esc(m.url)}" data-kind="${m.kind}" data-drive="${esc(m.driveUrl || '')}" data-cap="${esc(cap)}" title="${fmtSize(m.size)}">
     ${m.lat != null ? '<span class="pin" title="Has location">📍</span>' : ''}
-    <button class="del-file" data-del-file="${m.id}" aria-label="Delete this ${m.kind === 'video' ? 'video' : 'photo'}" title="Delete this file">${ICON_TRASH}</button>
+    ${isSuper() ? `<button class="del-file" data-del-file="${m.id}" aria-label="Delete this ${m.kind === 'video' ? 'video' : 'photo'}" title="Delete this file">${ICON_TRASH}</button>` : ''}
     ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">▶ ${fmtSize(m.size)}</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
   </div>`;
 }
@@ -159,7 +165,7 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
       ${captureLine(s)}
       ${s.link ? `<a class="sub-link" href="${esc(s.link)}" target="_blank" rel="noopener">🔗 ${esc(s.link.replace(/^https?:\/\//, '').slice(0, 70))}</a>` : ''}
       ${s.note ? `<div class="note"><b>Team note:</b> ${esc(s.note)}</div>` : ''}
-      ${!pending ? `<div class="reviewed ${s.status}"><b>${s.status === 'approved' ? 'Approved' : 'Rejected'}</b> ${ago(s.reviewed_at)}${s.comment ? ` · “${esc(s.comment)}”` : ''}</div>` : ''}
+      ${!pending ? `<div class="reviewed ${s.status}"><b>${s.status === 'approved' ? 'Approved' : 'Rejected'}</b> ${ago(s.reviewed_at)}${s.reviewed_by ? ` by ${esc(s.reviewed_by)}` : ''}${s.comment ? ` · “${esc(s.comment)}”` : ''}</div>` : ''}
       <div class="rv ${pending || drafts[s.id] !== undefined ? '' : 'hidden'}" style="display:grid; gap:8px">
         <textarea class="input" id="c-${s.id}" data-c="${s.id}" placeholder="Comment for the team (required to reject)" rows="2">${esc(drafts[s.id] ?? (pending ? '' : s.comment))}</textarea>
         <div class="actions">
@@ -169,7 +175,7 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
       </div>
       <div class="sub-foot">
         ${!pending && drafts[s.id] === undefined ? `<button class="btn ghost sm" data-change="${s.id}">Change decision</button>` : '<span></span>'}
-        <button class="del-btn" data-del-sub="${s.id}" data-files="${s.media.length}" data-status="${s.status}" data-pts="${s.points ?? ''}">Delete submission</button>
+        ${isSuper() ? `<button class="del-btn" data-del-sub="${s.id}" data-files="${s.media.length}" data-status="${s.status}" data-pts="${s.points ?? ''}">Delete submission</button>` : ''}
       </div>
     </article>`;
 }
@@ -210,9 +216,10 @@ async function viewTeams() {
         <option value="number" ${teamSort === 'number' ? 'selected' : ''}>Sort: team number</option>
         <option value="points" ${teamSort === 'points' ? 'selected' : ''}>Sort: points</option>
       </select>
-      <button class="btn ghost sm" id="addTeam">+ Add team</button>
-      <button class="btn sm" id="printCodes">Print room codes</button>
+      ${isSuper() ? `<button class="btn ghost sm" id="addTeam">+ Add team</button>
+      <button class="btn sm" id="printCodes">Print room codes</button>` : ''}
     </div>
+    ${!isSuper() && !sorted.length ? '<div class="empty">No teams are assigned to you yet. Ask the super admin to assign your teams.</div>' : ''}
     <div class="teamgrid">${sorted.map(t => `
       <a class="card tcard ${t.pending ? 'has-pending' : ''}" href="#/team/${t.id}">
         ${t.pending ? `<span class="review-tag">${t.pending} to review</span>` : ''}
@@ -223,11 +230,12 @@ async function viewTeams() {
         <div>
           <div class="bar"><i style="width:${tasks.length ? (t.approved / tasks.length) * 100 : 0}%"></i></div>
           <div class="muted small" style="margin-top:6px">${t.approved}/${tasks.length} tasks approved</div>
+          ${isSuper() ? `<div class="reviewers-line" style="margin-top:4px">${t.reviewers.length ? 'Reviewer: ' + esc(t.reviewers.join(', ')) : 'No reviewer assigned'}</div>` : ''}
         </div>
         <div class="foot">
           <div class="avs">${t.members.map((m, i) => avatar(m.name, i)).join('')}${Array.from({ length: Math.max(0, d.maxMembers - t.members.length) }, () => '<span class="av av-empty">+</span>').join('')}</div>
           <span class="foot-r"><span class="muted small">${t.members.length}/${d.maxMembers} joined</span>
-            <button class="card-del" data-del-team="${t.id}" aria-label="Delete ${esc(t.name)}" title="Delete team">${ICON_TRASH}</button></span>
+            ${isSuper() ? `<button class="card-del" data-del-team="${t.id}" aria-label="Delete ${esc(t.name)}" title="Delete team">${ICON_TRASH}</button>` : ''}</span>
         </div>
       </a>`).join('')}
     </div>`);
@@ -236,6 +244,7 @@ async function viewTeams() {
     e.preventDefault(); e.stopPropagation(); // the card itself is a link to the team page
     if (await confirmDeleteTeam(+b.dataset.delTeam)) viewTeams();
   });
+  if (!isSuper()) return;
   $('#addTeam').onclick = async () => {
     const name = prompt('Team name', '');
     if (name === null) return;
@@ -265,16 +274,16 @@ async function viewTeam(id) {
     <a class="back" href="#/teams">← All teams</a>
     <section class="card thead">
       <div style="display:grid; gap:14px">
-        <input class="namefield" id="teamName" value="${esc(team.name)}" maxlength="40" aria-label="Team name">
+        <input class="namefield" id="teamName" value="${esc(team.name)}" maxlength="40" aria-label="Team name" ${isSuper() ? '' : 'readonly'}>
         <div class="codebig">
           <span class="muted small">ROOM CODE</span><b>${esc(team.code)}</b>
-          <button class="btn ghost sm" id="copyLink">Copy join link</button>
+          ${isSuper() ? `<button class="btn ghost sm" id="copyLink">Copy join link</button>
           <button class="btn ghost sm" id="newCode">New code</button>
-          <button class="btn sm danger-ghost" id="deleteTeam">${ICON_TRASH} Delete team</button>
+          <button class="btn sm danger-ghost" id="deleteTeam">${ICON_TRASH} Delete team</button>` : ''}
         </div>
         <div>
           <div class="muted small" style="margin-bottom:6px">MEMBERS · ${members.length}/${maxMembers}</div>
-          ${members.map((m, i) => `<span class="mchip">${avatar(m.name, i)}${esc(m.name)}<button class="kick" data-kick="${m.id}" data-name="${esc(m.name)}" data-subs="${submissions.filter(x => x.member_id === m.id).length}">Remove</button></span>`).join('') || '<span class="muted">No one has joined yet.</span>'}
+          ${members.map((m, i) => `<span class="mchip">${avatar(m.name, i)}${esc(m.name)}${isSuper() ? `<button class="kick" data-kick="${m.id}" data-name="${esc(m.name)}" data-subs="${submissions.filter(x => x.member_id === m.id).length}">Remove</button>` : ''}</span>`).join('') || '<span class="muted">No one has joined yet.</span>'}
         </div>
       </div>
       <div class="scorebox">
@@ -314,6 +323,15 @@ async function viewTeam(id) {
       </div>`;
     }).join('') : `<div class="empty">No tasks in this filter.</div>`}</div>`);
 
+  $$('#ttFilter [data-f]').forEach(b => b.onclick = () => { teamTaskFilter = b.dataset.f; viewTeam(id); });
+  $$('[data-toggle]').forEach(b => b.onclick = () => {
+    const row = rows.find(r => `${id}:${r.t.id}` === b.dataset.toggle);
+    openRows[b.dataset.toggle] = !(openRows[b.dataset.toggle] ?? row.status === 'pending');
+    viewTeam(id);
+  });
+  $('#expandAll').onclick = () => { visible.forEach(r => (openRows[`${id}:${r.t.id}`] = true)); viewTeam(id); };
+  $('#collapseAll').onclick = () => { visible.forEach(r => (openRows[`${id}:${r.t.id}`] = false)); viewTeam(id); };
+  if (!isSuper()) return;
   $('#teamName').onchange = async e => {
     try { await api('/api/admin/teams/' + id, { method: 'PATCH', body: JSON.stringify({ name: e.target.value }) }); toast('Team renamed'); }
     catch (err) { toast('Error', err.message, 'rejected'); }
@@ -341,14 +359,6 @@ async function viewTeam(id) {
       viewTeam(id);
     } catch (err) { toast('Error', err.message, 'rejected'); }
   });
-  $$('#ttFilter [data-f]').forEach(b => b.onclick = () => { teamTaskFilter = b.dataset.f; viewTeam(id); });
-  $$('[data-toggle]').forEach(b => b.onclick = () => {
-    const row = rows.find(r => `${id}:${r.t.id}` === b.dataset.toggle);
-    openRows[b.dataset.toggle] = !(openRows[b.dataset.toggle] ?? row.status === 'pending');
-    viewTeam(id);
-  });
-  $('#expandAll').onclick = () => { visible.forEach(r => (openRows[`${id}:${r.t.id}`] = true)); viewTeam(id); };
-  $('#collapseAll').onclick = () => { visible.forEach(r => (openRows[`${id}:${r.t.id}`] = false)); viewTeam(id); };
 }
 
 // ---------- Review queue (all teams) ----------
@@ -367,7 +377,7 @@ async function viewQueue() {
       <select class="input sm" id="qTeam"><option value="">All teams</option>${teamsCache.map(t => `<option value="${t.id}" ${+queueTeam === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
       <select class="input sm" id="qTask"><option value="">All tasks</option>${tasksCache.map((t, i) => `<option value="${t.id}" ${+queueTask === t.id ? 'selected' : ''}>#${i + 1} ${esc(t.title)}</option>`).join('')}</select>
     </div>
-    ${queueStatus === 'pending' ? '<p class="muted small" style="margin:-6px 0 14px">Oldest first, across all teams.</p>' : ''}
+    ${queueStatus === 'pending' ? `<p class="muted small" style="margin:-6px 0 14px">Oldest first, across ${isSuper() ? 'all teams' : 'your teams'}.</p>` : ''}
     <div class="grid">${rows.length ? rows.map(r => subCard(r, { showTeam: true, showTask: true })).join('') : `<div class="empty" style="grid-column:1/-1">${queueStatus === 'pending' ? 'All caught up. New submissions appear here live.' : 'No submissions.'}</div>`}</div>`);
   $$('#qStatus [data-s]').forEach(b => b.onclick = () => { queueStatus = b.dataset.s; viewQueue(); });
   $('#qTeam').onchange = e => { queueTeam = e.target.value; viewQueue(); };
@@ -379,7 +389,7 @@ async function viewBoard() {
   const rows = await api('/api/admin/leaderboard');
   paint(`<div class="toolbar"><h2>Leaderboard</h2></div>
     <div class="card">${rows.map((r, i) => `
-      <a class="lbrow" href="#/team/${r.id}" style="${i ? 'border-top:1px solid var(--line)' : ''}"><span class="rank">${i + 1}</span><span class="name">${esc(r.name)}</span>
+      <a class="lbrow" ${isSuper() || me.teamIds.includes(r.id) ? `href="#/team/${r.id}"` : ''} style="${i ? 'border-top:1px solid var(--line)' : ''}"><span class="rank">${i + 1}</span><span class="name">${esc(r.name)}</span>
       <span class="muted small">${r.approved} approved · ${r.pending} to review</span><span class="pill pts" style="font-size:16px">${r.points}</span></a>`).join('')}</div>`);
 }
 
@@ -538,6 +548,104 @@ function editTask(task) {
   f.title.focus();
 }
 
+// ---------- Admins (reviewer accounts, super admin only) ----------
+async function viewAdmins() {
+  const [{ admins, superUsername }, { teams }] = await Promise.all([api('/api/admin/admins'), api('/api/admin/teams')]);
+  teamsCache = teams;
+  const teamName = id => teams.find(t => t.id === id)?.name || '';
+  const covered = new Set(admins.flatMap(a => a.teamIds));
+  const unassigned = teams.filter(t => !covered.has(t.id));
+  paint(`
+    <div class="toolbar">
+      <h2>Admins</h2>
+      <span class="muted small">${admins.length} reviewer${admins.length === 1 ? '' : 's'} · ${unassigned.length ? `${unassigned.length} team${unassigned.length === 1 ? '' : 's'} without a reviewer` : 'every team has a reviewer'}</span>
+      <button class="btn blue sm" id="newAdminBtn">+ New admin</button>
+    </div>
+    <p class="muted small" style="margin:-6px 0 14px">Admins log in at <b>${esc(location.origin)}/admin</b> with the username and password you set. They only see their assigned teams and can approve or reject submissions. You (<b>${esc(superUsername)}</b>) can do everything.</p>
+    <div class="alist">${admins.map(a => `
+      <div class="card aitem">
+        <div class="who">
+          <div class="ttop"><b>${esc(a.name)}</b><span class="uname">@${esc(a.username)}</span></div>
+          <div class="chips">${a.teamIds.length ? a.teamIds.map(id => `<span class="req-pill">${esc(teamName(id))}</span>`).join('') : '<span class="req-pill any">No teams assigned</span>'}</div>
+        </div>
+        <div class="tacts">
+          <button class="btn ghost sm" data-edit-admin="${a.id}">Edit</button>
+          <button class="del-btn" data-del-admin="${a.id}">Delete</button>
+        </div>
+      </div>`).join('') || '<div class="empty">No admins yet. Add one with “+ New admin” and assign their teams.</div>'}</div>`);
+  $('#newAdminBtn').onclick = () => editAdmin(null, admins, teams);
+  $$('[data-edit-admin]').forEach(b => b.onclick = () => editAdmin(admins.find(a => a.id === +b.dataset.editAdmin), admins, teams));
+  $$('[data-del-admin]').forEach(b => b.onclick = async () => {
+    const a = admins.find(x => x.id === +b.dataset.delAdmin);
+    if (!await choose(`Delete ${a.name}?`, `<b>@${esc(a.username)}</b> is signed out and can no longer log in. Reviews they already made stay.`,
+      [{ label: 'Delete admin', value: true, kind: 'danger' }])) return;
+    try { await api('/api/admin/admins/' + a.id, { method: 'DELETE' }); toast(`${a.name} deleted`); viewAdmins(); }
+    catch (err) { toast('Error', err.message, 'rejected'); }
+  });
+}
+
+const randomPassword = () => {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const b = crypto.getRandomValues(new Uint8Array(10));
+  return [...b].map(x => chars[x % chars.length]).join('');
+};
+
+function editAdmin(admin, admins, teams) {
+  const a = admin || { name: '', username: '', teamIds: [] };
+  const others = {}; // team id -> other reviewers' names
+  admins.filter(x => x.id !== a.id).forEach(x => x.teamIds.forEach(t => (others[t] ||= []).push(x.name)));
+  const el = document.createElement('div');
+  el.className = 'dlg-scrim';
+  el.innerHTML = `
+    <form class="dlg card tedit" autocomplete="off">
+      <div class="tedit-hd"><h3>${admin ? 'Edit admin' : 'New admin'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+      <label class="fl">Name<input class="input" name="name" maxlength="60" required value="${esc(a.name)}" placeholder="e.g. Priya"></label>
+      <label class="fl">Username<input class="input" name="username" maxlength="40" required value="${esc(a.username)}" placeholder="e.g. priya" autocapitalize="none" spellcheck="false"></label>
+      <label class="fl">${admin ? 'New password <span class="muted small">(leave empty to keep the current one)</span>' : 'Password'}
+        <span class="pw-row"><input class="input" name="password" type="text" minlength="6" ${admin ? '' : 'required'} placeholder="${admin ? 'Unchanged' : 'At least 6 characters'}" autocomplete="new-password" spellcheck="false"><button type="button" class="btn ghost sm" data-gen>Generate</button></span>
+      </label>
+      <fieldset class="reqset">
+        <legend>Teams to review</legend>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button type="button" class="btn ghost sm" data-pick="all">Select all</button>
+          <button type="button" class="btn ghost sm" data-pick="free">Select teams without a reviewer</button>
+          <button type="button" class="btn ghost sm" data-pick="none">Clear</button>
+        </div>
+        <div class="teampick">${teams.map(t => `<label class="${others[t.id] ? 'taken' : ''}" title="${others[t.id] ? 'Also reviewed by ' + esc(others[t.id].join(', ')) : ''}">
+          <input type="checkbox" name="team" value="${t.id}" ${a.teamIds.includes(t.id) ? 'checked' : ''}><span>${esc(t.name)}${others[t.id] ? ` · ${esc(others[t.id].join(', '))}` : ''}</span></label>`).join('')}</div>
+        <p class="muted small hint" id="pickCount"></p>
+      </fieldset>
+      ${admin ? '<p class="muted small hint">Changing the password signs this admin out on every device.</p>' : ''}
+      <div class="dlg-actions"><button type="button" class="btn sm ghost" data-close>Cancel</button><button class="btn sm blue">${admin ? 'Save changes' : 'Create admin'}</button></div>
+    </form>`;
+  document.body.appendChild(el);
+  const f = el.querySelector('form');
+  const boxes = [...f.querySelectorAll('input[name=team]')];
+  const count = () => { const n = boxes.filter(b => b.checked).length; f.querySelector('#pickCount').textContent = `${n} team${n === 1 ? '' : 's'} selected`; };
+  f.onchange = count;
+  f.onclick = e => {
+    if (e.target.closest('[data-close]')) return el.remove();
+    if (e.target.closest('[data-gen]')) { f.password.value = randomPassword(); return; }
+    const pick = e.target.closest('[data-pick]')?.dataset.pick;
+    if (pick) { boxes.forEach(b => (b.checked = pick === 'all' || (pick === 'free' && (b.checked || !others[b.value])))); count(); }
+  };
+  el.onclick = e => { if (e.target === el) el.remove(); };
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const body = { name: f.elements.namedItem("name").value, username: f.username.value, password: f.password.value, teamIds: boxes.filter(b => b.checked).map(b => +b.value) };
+    try {
+      await api(admin ? '/api/admin/admins/' + admin.id : '/api/admin/admins', { method: admin ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      el.remove();
+      const login = body.password ? `Username: ${body.username.trim().toLowerCase()} · Password: ${body.password}` : '';
+      toast(admin ? 'Admin saved' : 'Admin created', login ? login + ' (share these with them)' : '', 'approved');
+      if (login) try { await navigator.clipboard.writeText(`${location.origin}/admin\nUsername: ${body.username.trim().toLowerCase()}\nPassword: ${body.password}`); toast('Login details copied', 'Paste them to the admin.'); } catch {}
+      viewAdmins();
+    } catch (err) { toast('Error', err.message, 'rejected'); }
+  };
+  count();
+  f.elements.namedItem("name").focus();
+}
+
 // ---------- Settings ----------
 function driveCard(d) {
   const head = (pill, cls) => `<span class="pill ${cls}">${pill}</span>`;
@@ -572,6 +680,18 @@ function driveCard(d) {
 }
 
 async function viewSettings() {
+  if (!isSuper()) {
+    paint(`
+      <div style="display:grid; gap:12px; max-width:720px">
+        <h2 style="font-size:28px">Settings</h2>
+        <div class="card setting"><div><b>${esc(me.name)}</b><div class="muted small">Signed in as ${esc(me.username)} · reviewing ${me.teamIds.length} team${me.teamIds.length === 1 ? '' : 's'}</div></div></div>
+        <label class="card setting"><div><b>Sound on new submissions</b><div class="muted small">Plays a chime when one of your teams sends something.</div></div><span class="switch"><input type="checkbox" id="setSound" ${store.get('mm_sound') !== '0' ? 'checked' : ''}><span></span></span></label>
+        <button class="btn ghost" id="logoutBtn" style="justify-self:start">Log out</button>
+      </div>`);
+    $('#setSound').onchange = e => store.set('mm_sound', e.target.checked ? '1' : '0');
+    $('#logoutBtn').onclick = logout;
+    return;
+  }
   const [s, d] = await Promise.all([loadSummary(), api('/api/admin/drive')]);
   paint(`
     <div style="display:grid; gap:12px; max-width:720px">
@@ -710,7 +830,17 @@ function connect() {
     liveRefresh(d.teamId);
   });
   es.addEventListener('reviewed', ev => liveRefresh(JSON.parse(ev.data).teamId));
-  es.addEventListener('teams', () => route.name === 'teams' && render());
+  es.addEventListener('teams', async () => {
+    if (!isSuper()) { // the super admin may have changed this reviewer's teams
+      try { me = await api('/api/admin/me'); } catch { return; }
+      teamsCache = [];
+      if (route.name === 'team' && !me.teamIds.includes(route.id)) { location.hash = '#/teams'; return; }
+      if (['teams', 'queue', 'board', 'settings'].includes(route.name)) render();
+      return;
+    }
+    if (route.name === 'teams') render();
+  });
+  es.addEventListener('signout', () => { logout(); $('#loginErr').textContent = 'You were signed out. Log in again with your new password.'; });
   es.addEventListener('drive', () => route.name === 'settings' && render());
 }
 
@@ -725,7 +855,9 @@ if (driveResult) {
 
 async function boot() {
   if (!token) { $('#login').classList.remove('hidden'); return; }
-  try { await loadSummary(); } catch { return; }
+  try { me = await api('/api/admin/me'); await loadSummary(); } catch { return; }
+  document.body.classList.toggle('reviewer', !me.super);
+  $('#roleLabel').textContent = me.super ? 'Super admin' : `Reviewer · ${me.name}`;
   $('#login').classList.add('hidden');
   $('#dash').classList.remove('hidden');
   connect();

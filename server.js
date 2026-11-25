@@ -18,6 +18,7 @@ const drive = require('./drive');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
+const SUPERADMIN_USERNAME = (process.env.SUPERADMIN_USERNAME || 'admin').trim().toLowerCase();
 if (!process.env.ADMIN_PASSWORD) console.warn('⚠️  ADMIN_PASSWORD not set — using "changeme". Set it before the event!');
 
 let secret = getSetting('secret', null);
@@ -34,7 +35,7 @@ app.use(express.json({ limit: '1mb' }));
 
 // ---------- Realtime (Server-Sent Events) ----------
 const teamClients = new Map(); // teamId -> Set<res>
-const adminClients = new Set();
+const adminClients = new Map(); // res -> admin (super admin, or a reviewer limited to their teams)
 
 function openStream(req, res) {
   res.writeHead(200, {
@@ -50,7 +51,13 @@ function openStream(req, res) {
 function send(res, event, data) { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
 function toTeam(teamId, event, data) { (teamClients.get(teamId) || []).forEach(r => send(r, event, data)); }
 function toAllTeams(event, data) { teamClients.forEach(set => set.forEach(r => send(r, event, data))); }
-function toAdmins(event, data) { adminClients.forEach(r => send(r, event, data)); }
+// Reviewers only hear about their own teams (assignments are looked up fresh, so changes apply at once).
+function toAdmins(event, data) {
+  adminClients.forEach((a, r) => {
+    if (a.super || data?.teamId == null || reviewerTeamIds(a.id).includes(data.teamId)) send(r, event, data);
+  });
+}
+function toAdmin(adminId, event, data) { adminClients.forEach((a, r) => { if (a.id === adminId) send(r, event, data); }); }
 
 // ---------- Auth helpers ----------
 function bearer(req) {
@@ -63,11 +70,39 @@ function teamAuth(req, res, next) {
   req.member = m;
   next();
 }
+// Passwords for reviewer accounts: scrypt with a per-account salt.
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return salt + ':' + crypto.scryptSync(pw, salt, 32).toString('hex');
+}
+function checkPassword(pw, stored) {
+  const [salt, hash] = String(stored).split(':');
+  if (!salt || !hash) return false;
+  const a = crypto.scryptSync(pw, salt, 32), b = Buffer.from(hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+const safeEqual = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const reviewerTeamIds = adminId => db.prepare('SELECT team_id FROM admin_teams WHERE admin_id = ? ORDER BY team_id').all(adminId).map(r => r.team_id);
+
+// Super admin (ADMIN_PASSWORD) can do everything. Reviewers see and review only their assigned teams.
 function adminAuth(req, res, next) {
   const t = bearer(req);
-  if (t.length !== ADMIN_TOKEN.length || !crypto.timingSafeEqual(Buffer.from(t), Buffer.from(ADMIN_TOKEN)))
-    return res.status(401).json({ error: 'Not authorised' });
+  if (t && safeEqual(t, ADMIN_TOKEN)) { req.admin = { super: true, id: 0, name: 'Super admin', username: SUPERADMIN_USERNAME }; return next(); }
+  const a = t && db.prepare('SELECT id, name, username FROM admins WHERE token = ?').get(t);
+  if (!a) return res.status(401).json({ error: 'Not authorised' });
+  req.admin = { super: false, ...a, teamIds: reviewerTeamIds(a.id) };
   next();
+}
+function superOnly(req, res, next) {
+  if (!req.admin?.super) return res.status(403).json({ error: 'Only the super admin can do that.' });
+  next();
+}
+const canSeeTeam = (req, teamId) => req.admin.super || req.admin.teamIds.includes(+teamId);
+// SQL fragment limiting a query to the teams this admin may see.
+function teamScope(req, col) {
+  if (req.admin.super) return { sql: '1', args: [] };
+  const ids = req.admin.teamIds;
+  return ids.length ? { sql: `${col} IN (${ids.map(() => '?').join(',')})`, args: ids } : { sql: '0', args: [] };
 }
 
 // ---------- Queries ----------
@@ -283,18 +318,91 @@ setInterval(() => {
 
 // ---------- Admin API ----------
 app.post('/api/admin/login', (req, res) => {
-  if (String(req.body.password || '') !== ADMIN_PASSWORD) return res.status(401).json({ error: 'Wrong password' });
-  res.json({ token: ADMIN_TOKEN });
+  const username = String(req.body.username || '').trim().toLowerCase();
+  const password = String(req.body.password || '');
+  if (!username || !password) return res.status(400).json({ error: 'Enter your username and password.' });
+  if (username === SUPERADMIN_USERNAME) {
+    if (!safeEqual(crypto.createHash('sha256').update(password).digest('hex'), crypto.createHash('sha256').update(ADMIN_PASSWORD).digest('hex')))
+      return res.status(401).json({ error: 'Wrong username or password.' });
+    return res.json({ token: ADMIN_TOKEN });
+  }
+  const a = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+  if (!a || !checkPassword(password, a.pass_hash)) return res.status(401).json({ error: 'Wrong username or password.' });
+  res.json({ token: a.token });
+});
+
+app.get('/api/admin/me', adminAuth, (req, res) => {
+  const { super: isSuper, id, name, username, teamIds = [] } = req.admin;
+  res.json({ super: isSuper, id, name, username, teamIds });
 });
 
 app.get('/api/admin/events', adminAuth, (req, res) => {
   openStream(req, res);
-  adminClients.add(res);
+  adminClients.set(res, { super: req.admin.super, id: req.admin.id });
   req.on('close', () => adminClients.delete(res));
 });
 
+// ---------- Reviewer accounts (super admin only) ----------
+function cleanAdmin(b, creating) {
+  const a = {
+    name: String(b.name || '').trim().slice(0, 60),
+    username: String(b.username || '').trim().toLowerCase().slice(0, 40),
+    password: String(b.password || ''),
+    teamIds: [...new Set((Array.isArray(b.teamIds) ? b.teamIds : []).map(Number).filter(Number.isInteger))],
+  };
+  if (!a.name) return { error: 'Enter a name.' };
+  if (!/^[a-z0-9._-]{3,40}$/.test(a.username)) return { error: 'Username needs 3–40 letters, numbers, dots, dashes or underscores (no spaces).' };
+  if (a.username === SUPERADMIN_USERNAME) return { error: 'That username is taken by the super admin.' };
+  if ((creating || a.password) && a.password.length < 6) return { error: 'Password must be at least 6 characters.' };
+  return a;
+}
+function setAdminTeams(adminId, teamIds) {
+  db.prepare('DELETE FROM admin_teams WHERE admin_id = ?').run(adminId);
+  const ins = db.prepare('INSERT OR IGNORE INTO admin_teams (admin_id, team_id) SELECT ?, id FROM teams WHERE id = ?');
+  teamIds.forEach(t => ins.run(adminId, t));
+}
+app.get('/api/admin/admins', adminAuth, superOnly, (req, res) => {
+  const admins = db.prepare('SELECT id, name, username, created_at FROM admins ORDER BY name COLLATE NOCASE').all();
+  admins.forEach(a => (a.teamIds = reviewerTeamIds(a.id)));
+  res.json({ admins, superUsername: SUPERADMIN_USERNAME });
+});
+app.post('/api/admin/admins', adminAuth, superOnly, (req, res) => {
+  const a = cleanAdmin(req.body, true);
+  if (a.error) return res.status(400).json(a);
+  if (db.prepare('SELECT 1 FROM admins WHERE username = ?').get(a.username)) return res.status(409).json({ error: 'That username is already in use.' });
+  db.transaction(() => {
+    const r = db.prepare('INSERT INTO admins (name, username, pass_hash, token) VALUES (?, ?, ?, ?)')
+      .run(a.name, a.username, hashPassword(a.password), crypto.randomBytes(24).toString('hex'));
+    setAdminTeams(r.lastInsertRowid, a.teamIds);
+  })();
+  res.json({ ok: true });
+});
+app.put('/api/admin/admins/:id', adminAuth, superOnly, (req, res) => {
+  const id = +req.params.id;
+  if (!db.prepare('SELECT 1 FROM admins WHERE id = ?').get(id)) return res.status(404).json({ error: 'Admin not found' });
+  const a = cleanAdmin(req.body, false);
+  if (a.error) return res.status(400).json(a);
+  if (db.prepare('SELECT 1 FROM admins WHERE username = ? AND id != ?').get(a.username, id)) return res.status(409).json({ error: 'That username is already in use.' });
+  db.transaction(() => {
+    db.prepare('UPDATE admins SET name = ?, username = ? WHERE id = ?').run(a.name, a.username, id);
+    // A new password signs them out everywhere.
+    if (a.password) db.prepare('UPDATE admins SET pass_hash = ?, token = ? WHERE id = ?').run(hashPassword(a.password), crypto.randomBytes(24).toString('hex'), id);
+    setAdminTeams(id, a.teamIds);
+  })();
+  if (a.password) toAdmin(id, 'signout', {});
+  else toAdmin(id, 'teams', {});
+  res.json({ ok: true });
+});
+app.delete('/api/admin/admins/:id', adminAuth, superOnly, (req, res) => {
+  const id = +req.params.id;
+  toAdmin(id, 'signout', {});
+  db.prepare('DELETE FROM admins WHERE id = ?').run(id);
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/summary', adminAuth, (req, res) => {
-  const c = db.prepare(`SELECT status, COUNT(*) n FROM submissions GROUP BY status`).all();
+  const sc = teamScope(req, 'team_id');
+  const c = db.prepare(`SELECT status, COUNT(*) n FROM submissions WHERE ${sc.sql} GROUP BY status`).all(...sc.args);
   const counts = { pending: 0, approved: 0, rejected: 0 };
   c.forEach(r => (counts[r.status] = r.n));
   res.json({
@@ -305,7 +413,8 @@ app.get('/api/admin/summary', adminAuth, (req, res) => {
 });
 
 app.get('/api/admin/submissions', adminAuth, (req, res) => {
-  const where = [], args = [];
+  const sc = teamScope(req, 's.team_id');
+  const where = [sc.sql], args = [...sc.args];
   if (['pending', 'approved', 'rejected'].includes(req.query.status)) { where.push('s.status = ?'); args.push(req.query.status); }
   if (req.query.team) { where.push('s.team_id = ?'); args.push(+req.query.team); }
   if (req.query.task) { where.push('s.task_id = ?'); args.push(+req.query.task); }
@@ -315,7 +424,7 @@ app.get('/api/admin/submissions', adminAuth, (req, res) => {
     SELECT s.*, t.name AS team_name, k.title AS task_title, k.points, k.description AS task_description, m.name AS member_name
     FROM submissions s JOIN teams t ON t.id = s.team_id JOIN tasks k ON k.id = s.task_id
     LEFT JOIN members m ON m.id = s.member_id
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT 300`).all(...args);
+    WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 300`).all(...args);
   const media = mediaFor(rows.map(r => r.id));
   rows.forEach(r => (r.media = media[r.id] || []));
   res.json(rows);
@@ -327,12 +436,12 @@ app.post('/api/admin/submissions/:id/review', adminAuth, (req, res) => {
   if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
   if (status === 'rejected' && !comment) return res.status(400).json({ error: 'Add a comment so the team knows why it was rejected.' });
   const sub = db.prepare('SELECT * FROM submissions WHERE id = ?').get(req.params.id);
-  if (!sub) return res.status(404).json({ error: 'Not found' });
+  if (!sub || !canSeeTeam(req, sub.team_id)) return res.status(404).json({ error: 'Not found' });
   if (status === 'approved') {
     const other = db.prepare(`SELECT id FROM submissions WHERE team_id = ? AND task_id = ? AND status = 'approved' AND id != ?`).get(sub.team_id, sub.task_id, sub.id);
     if (other) return res.status(409).json({ error: 'This team already has an approved submission for this task.' });
   }
-  db.prepare('UPDATE submissions SET status = ?, comment = ?, reviewed_at = unixepoch() WHERE id = ?').run(status, comment, sub.id);
+  db.prepare('UPDATE submissions SET status = ?, comment = ?, reviewed_at = unixepoch(), reviewed_by = ? WHERE id = ?').run(status, comment, req.admin.name, sub.id);
   const task = db.prepare('SELECT title, points FROM tasks WHERE id = ?').get(sub.task_id);
   toTeam(sub.team_id, 'review', { submissionId: sub.id, status, comment, task: task.title, points: task.points });
   toAdmins('reviewed', { id: sub.id, teamId: sub.team_id });
@@ -341,34 +450,39 @@ app.post('/api/admin/submissions/:id/review', adminAuth, (req, res) => {
 });
 
 app.get('/api/admin/teams', adminAuth, (req, res) => {
-  const teams = db.prepare(`${scoreSql} ORDER BY t.id`).all();
+  const sc = teamScope(req, 't.id');
+  const teams = db.prepare(`${scoreSql} WHERE ${sc.sql} ORDER BY t.id`).all(...sc.args);
   const members = db.prepare('SELECT id, team_id, name, created_at FROM members ORDER BY id').all();
-  teams.forEach(t => (t.members = members.filter(m => m.team_id === t.id)));
+  const reviewers = req.admin.super ? db.prepare('SELECT at.team_id, a.name FROM admin_teams at JOIN admins a ON a.id = at.admin_id ORDER BY a.name').all() : [];
+  teams.forEach(t => {
+    t.members = members.filter(m => m.team_id === t.id);
+    t.reviewers = reviewers.filter(r => r.team_id === t.id).map(r => r.name);
+  });
   res.json({ teams, maxMembers: MAX_MEMBERS });
 });
 app.get('/api/admin/teams/:id', adminAuth, (req, res) => {
   const id = +req.params.id;
-  if (!db.prepare('SELECT 1 FROM teams WHERE id = ?').get(id)) return res.status(404).json({ error: 'Team not found' });
+  if (!canSeeTeam(req, id) || !db.prepare('SELECT 1 FROM teams WHERE id = ?').get(id)) return res.status(404).json({ error: 'Team not found' });
   const st = teamState(id);
   st.team.rejected = db.prepare(`SELECT COUNT(*) n FROM submissions WHERE team_id = ? AND status = 'rejected'`).get(id).n;
   res.json(st);
 });
 app.get('/api/admin/leaderboard', adminAuth, (req, res) => res.json(leaderboard()));
 
-app.post('/api/admin/teams', adminAuth, (req, res) => {
+app.post('/api/admin/teams', adminAuth, superOnly, (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM teams').get().n;
   const name = String(req.body.name || '').trim() || `Team ${String(n + 1).padStart(2, '0')}`;
   db.prepare('INSERT INTO teams (name, code) VALUES (?, ?)').run(name.slice(0, 40), uniqueCode());
   res.json({ ok: true });
 });
-app.patch('/api/admin/teams/:id', adminAuth, (req, res) => {
+app.patch('/api/admin/teams/:id', adminAuth, superOnly, (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 40);
   if (!name) return res.status(400).json({ error: 'Name required' });
   db.prepare('UPDATE teams SET name = ? WHERE id = ?').run(name, req.params.id);
   toTeam(+req.params.id, 'refresh', {});
   res.json({ ok: true });
 });
-app.post('/api/admin/teams/:id/new-code', adminAuth, (req, res) => {
+app.post('/api/admin/teams/:id/new-code', adminAuth, superOnly, (req, res) => {
   db.prepare('UPDATE teams SET code = ? WHERE id = ?').run(uniqueCode(), req.params.id);
   res.json({ ok: true });
 });
@@ -387,7 +501,7 @@ function deleteSubmissions(subIds) {
 }
 
 // Remove a member. ?withMedia=1 also deletes every submission they sent (and its photos/videos).
-app.delete('/api/admin/members/:id', adminAuth, (req, res) => {
+app.delete('/api/admin/members/:id', adminAuth, superOnly, (req, res) => {
   const m = db.prepare('SELECT team_id FROM members WHERE id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Member not found' });
   let files = 0;
@@ -405,7 +519,7 @@ app.delete('/api/admin/members/:id', adminAuth, (req, res) => {
 });
 
 // Delete a team with its members, submissions and media (media goes to the Drive trash).
-app.delete('/api/admin/teams/:id', adminAuth, (req, res) => {
+app.delete('/api/admin/teams/:id', adminAuth, superOnly, (req, res) => {
   const t = db.prepare('SELECT id FROM teams WHERE id = ?').get(req.params.id);
   if (!t) return res.status(404).json({ error: 'Team not found' });
   let files = 0;
@@ -422,7 +536,7 @@ app.delete('/api/admin/teams/:id', adminAuth, (req, res) => {
 });
 
 // Delete a whole submission with all its photos/videos. Points update automatically.
-app.delete('/api/admin/submissions/:id', adminAuth, (req, res) => {
+app.delete('/api/admin/submissions/:id', adminAuth, superOnly, (req, res) => {
   const sub = db.prepare('SELECT team_id FROM submissions WHERE id = ?').get(req.params.id);
   if (!sub) return res.status(404).json({ error: 'Submission not found' });
   const files = deleteSubmissions([+req.params.id]);
@@ -432,7 +546,7 @@ app.delete('/api/admin/submissions/:id', adminAuth, (req, res) => {
 });
 
 // Delete one photo/video. Deleting the last one removes the submission too.
-app.delete('/api/admin/media/:id', adminAuth, (req, res) => {
+app.delete('/api/admin/media/:id', adminAuth, superOnly, (req, res) => {
   const m = db.prepare('SELECT media.*, s.team_id FROM media JOIN submissions s ON s.id = media.submission_id WHERE media.id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'File not found' });
   const left = db.prepare('SELECT COUNT(*) n FROM media WHERE submission_id = ?').get(m.submission_id).n;
@@ -466,7 +580,7 @@ function cleanTask(b) {
   return t;
 }
 const taskError = t => !t.title ? 'Title required' : t.opens_at && t.closes_at && t.closes_at <= t.opens_at ? 'The closing time must be after the opening time.' : '';
-app.post('/api/admin/tasks', adminAuth, (req, res) => {
+app.post('/api/admin/tasks', adminAuth, superOnly, (req, res) => {
   const t = cleanTask(req.body);
   const bad = taskError(t);
   if (bad) return res.status(400).json({ error: bad });
@@ -476,7 +590,7 @@ app.post('/api/admin/tasks', adminAuth, (req, res) => {
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
-app.put('/api/admin/tasks/:id', adminAuth, (req, res) => {
+app.put('/api/admin/tasks/:id', adminAuth, superOnly, (req, res) => {
   const t = cleanTask(req.body);
   const bad = taskError(t);
   if (bad) return res.status(400).json({ error: bad });
@@ -486,7 +600,7 @@ app.put('/api/admin/tasks/:id', adminAuth, (req, res) => {
   res.json({ ok: true });
 });
 // Reorder: swap with the neighbour above (dir = -1) or below (dir = 1).
-app.post('/api/admin/tasks/:id/move', adminAuth, (req, res) => {
+app.post('/api/admin/tasks/:id/move', adminAuth, superOnly, (req, res) => {
   const dir = req.body.dir === -1 || req.body.dir === '-1' ? -1 : 1;
   db.transaction(() => {
     const all = db.prepare('SELECT id FROM tasks ORDER BY sort, id').all().map(r => r.id);
@@ -499,7 +613,7 @@ app.post('/api/admin/tasks/:id/move', adminAuth, (req, res) => {
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
-app.delete('/api/admin/tasks/:id', adminAuth, (req, res) => {
+app.delete('/api/admin/tasks/:id', adminAuth, superOnly, (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM submissions WHERE task_id = ?').get(req.params.id).n;
   if (n && req.query.force !== '1') return res.status(409).json({ error: `This task has ${n} submission(s). Deleting it removes them and their points.`, needsForce: true });
   deleteSubmissions(db.prepare('SELECT id FROM submissions WHERE task_id = ?').all(req.params.id).map(r => r.id));
@@ -508,19 +622,19 @@ app.delete('/api/admin/tasks/:id', adminAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/admin/settings', adminAuth, (req, res) => {
+app.post('/api/admin/settings', adminAuth, superOnly, (req, res) => {
   for (const k of ['showLeaderboard', 'submissionsOpen']) if (typeof req.body[k] === 'boolean') setSetting(k, req.body[k]);
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
 
-app.get('/api/admin/drive', adminAuth, (req, res) => res.json(drive.info()));
-app.post('/api/admin/drive/retry', adminAuth, (req, res) => { drive.retryFailed(); res.json({ ok: true }); });
+app.get('/api/admin/drive', adminAuth, superOnly, (req, res) => res.json(drive.info()));
+app.post('/api/admin/drive/retry', adminAuth, superOnly, (req, res) => { drive.retryFailed(); res.json({ ok: true }); });
 
 // Connecting a personal Google account: Admin → Settings → "Connect Google Drive" → Google → back here.
 // The redirect URL must be listed in the OAuth client in Cloud Console (see DRIVE_SETUP.md).
 const publicUrl = req => (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
-app.post('/api/admin/drive/connect', adminAuth, (req, res) => {
+app.post('/api/admin/drive/connect', adminAuth, superOnly, (req, res) => {
   if (drive.mode !== 'oauth') return res.status(400).json({ error: 'Google Drive OAuth client is not configured on the server.' });
   res.json({ url: drive.authUrl(publicUrl(req) + '/oauth/google/callback') });
 });
@@ -530,13 +644,13 @@ app.get('/oauth/google/callback', async (req, res) => {
   try { await drive.completeAuth(String(req.query.code || ''), String(req.query.state || '')); back('connected'); }
   catch (err) { console.error('Google Drive connect failed:', err.message); back('error:' + err.message); }
 });
-app.post('/api/admin/drive/disconnect', adminAuth, async (req, res) => { await drive.disconnect(); res.json({ ok: true }); });
+app.post('/api/admin/drive/disconnect', adminAuth, superOnly, async (req, res) => { await drive.disconnect(); res.json({ ok: true }); });
 let driveNotify = null;
 drive.onChange.add(() => { clearTimeout(driveNotify); driveNotify = setTimeout(() => toAdmins('drive', {}), 1500); });
 
-app.get('/api/admin/export.csv', adminAuth, (req, res) => {
+app.get('/api/admin/export.csv', adminAuth, superOnly, (req, res) => {
   const rows = db.prepare(`
-    SELECT t.name team, k.title task, k.points, s.status, s.comment, m.name member, s.link,
+    SELECT t.name team, k.title task, k.points, s.status, s.comment, s.reviewed_by, m.name member, s.link,
       datetime(s.created_at, 'unixepoch', '+330 minutes') submitted_at_ist, datetime(s.reviewed_at, 'unixepoch', '+330 minutes') reviewed_at_ist,
       (SELECT group_concat(
          md.kind || ' ' || COALESCE(strftime('%Y-%m-%d %H:%M:%S', md.captured_at / 1000, 'unixepoch', '+330 minutes') || ' IST', 'time unknown') || ' @ ' ||
@@ -544,7 +658,7 @@ app.get('/api/admin/export.csv', adminAuth, (req, res) => {
        FROM media md WHERE md.submission_id = s.id) media_capture
     FROM submissions s JOIN teams t ON t.id = s.team_id JOIN tasks k ON k.id = s.task_id LEFT JOIN members m ON m.id = s.member_id ORDER BY s.id`).all();
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const cols = ['team', 'task', 'points', 'status', 'comment', 'member', 'link', 'submitted_at_ist', 'reviewed_at_ist', 'media_capture'];
+  const cols = ['team', 'task', 'points', 'status', 'comment', 'reviewed_by', 'member', 'link', 'submitted_at_ist', 'reviewed_at_ist', 'media_capture'];
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="mumbai-maxxing-submissions.csv"');
   res.send([cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n'));

@@ -95,6 +95,27 @@ for (const table of ['uploads', 'media']) {
   for (const [col, def] of CAPTURE_COLS) if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }
 
+// Reviewer accounts created by the super admin, and the teams each one reviews.
+db.exec(`
+CREATE TABLE IF NOT EXISTS admins (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  pass_hash TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS admin_teams (
+  admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  PRIMARY KEY (admin_id, team_id)
+);
+`);
+{
+  const scols = db.prepare('PRAGMA table_info(submissions)').all().map(c => c.name);
+  if (!scols.includes('reviewed_by')) db.exec("ALTER TABLE submissions ADD COLUMN reviewed_by TEXT NOT NULL DEFAULT ''");
+}
+
 // Room codes avoid look-alike characters (0/O, 1/I/L) so they're easy to read out loud.
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function makeCode(len = 6) {
