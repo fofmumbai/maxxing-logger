@@ -698,7 +698,14 @@ async function startStream() {
         : { facingMode: { ideal: cam.facing }, width: { ideal: 3840 }, height: { ideal: 2160 } },
       audio: cam.mode === 'video',
     });
-    const v = $('#camView');
+    // A fresh <video> for every stream: iPhone Safari keeps the previous camera's size and
+    // orientation when srcObject is swapped, so after flipping to the rear camera the picture
+    // shrank into a letterboxed box instead of filling the screen.
+    const old = $('#camView');
+    const v = old.cloneNode(false);
+    old.replaceWith(v);
+    v.muted = true;
+    v.playsInline = true;
     v.srcObject = cam.stream;
     v.classList.toggle('mirror', cam.facing === 'user');
     await v.play().catch(() => {});

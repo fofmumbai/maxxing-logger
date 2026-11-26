@@ -270,6 +270,18 @@
     .cam-modes button.on { background: var(--lime); color: var(--ink); }
     .cam-modes button:disabled { opacity: .4; }
     .cam-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+    /* Right of the shutter: switch camera next to it, Done at the edge. */
+    .cam-right { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 14px; min-width: 0; }
+    .cam-right #camFlip { width: 48px; height: 48px; flex: none; background: rgba(0,0,0,.5); box-shadow: 0 0 0 2px rgba(255,255,255,.85); }
+    .cam-right .cam-done { flex: none; }
+    @media (max-width: 360px) {
+      .cam-bottom { padding-left: 10px; padding-right: 10px; }
+      .shutter { width: 70px; height: 70px; }
+      .cam-last { width: 46px; height: 46px; }
+      .cam-right { padding-left: 6px; gap: 6px; }
+      .cam-right #camFlip { width: 42px; height: 42px; }
+      .cam-right .cam-done { padding: 9px 12px; font-size: 14px; }
+    }
     .cam-last { justify-self: start; width: 52px; height: 52px; position: relative; }
     .cam-last .media { position: absolute; inset: 0; border-radius: 12px; overflow: hidden; background: rgba(255,255,255,.12); box-shadow: 0 0 0 2px rgba(255,255,255,.85); }
     .cam-last img, .cam-last video { width: 100%; height: 100%; object-fit: cover; }
@@ -384,7 +396,6 @@
       <button class="cam-ic" id="camClose" aria-label="Close camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <span class="cam-rec hidden" id="camRec"><i></i><span id="camTime">0:00</span></span>
       <button class="geo-pill" id="geoPill" type="button"></button>
-      <button class="cam-ic" id="camFlip" aria-label="Switch camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-3l-2-3H9L7 7H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z"/><path d="M9.5 12.5a2.5 2.5 0 0 1 4.3-1.7M14.5 13.5a2.5 2.5 0 0 1-4.3 1.7"/><path d="M14 9.5v1.5h-1.5M10 16.5V15h1.5"/></svg></button>
     </div>
     <div class="cam-msg hidden" id="camMsg"></div>
     <div class="cam-bottom">
@@ -395,7 +406,10 @@
       <div class="cam-row">
         <div class="cam-last" id="camLast"></div>
         <button class="shutter" id="camShutter" aria-label="Capture"><span></span></button>
-        <button class="cam-done" id="camDone">Done</button>
+        <div class="cam-right">
+          <button class="cam-ic" id="camFlip" aria-label="Switch camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-3l-2-3H9L7 7H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z"/><path d="M9.5 12.5a2.5 2.5 0 0 1 4.3-1.7M14.5 13.5a2.5 2.5 0 0 1-4.3 1.7"/><path d="M14 9.5v1.5h-1.5M10 16.5V15h1.5"/></svg></button>
+          <button class="cam-done" id="camDone">Done</button>
+        </div>
       </div>
     </div>
   </div>
