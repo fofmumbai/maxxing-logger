@@ -106,14 +106,14 @@ async function loadSummary() {
 // ---------- Shared: submission card ----------
 // Small dialog with labelled choices (clearer than OK/Cancel for destructive actions).
 // options: [{ label, value, kind: 'danger' | 'primary' | 'ghost' }] -> resolves to the chosen value, or null.
-function choose(title, body, options) {
+function choose(title, body, options, cancelLabel = 'Cancel') {
   return new Promise(resolve => {
     const el = document.createElement('div');
     el.className = 'dlg-scrim';
     el.innerHTML = `<div class="dlg card" role="alertdialog" aria-modal="true" aria-label="${esc(title)}">
       <h3>${esc(title)}</h3><p>${body}</p>
       <div class="dlg-actions">${options.map((o, i) => `<button class="btn sm ${o.kind === 'danger' ? 'coral' : o.kind === 'primary' ? '' : 'ghost'}" data-i="${i}">${esc(o.label)}</button>`).join('')}
-      <button class="btn sm ghost" data-i="-1">Cancel</button></div></div>`;
+      <button class="btn sm ghost" data-i="-1">${esc(cancelLabel)}</button></div></div>`;
     const done = v => { el.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
     const onKey = e => { if (e.key === 'Escape') done(null); };
     el.onclick = e => { const b = e.target.closest('[data-i]'); if (b) done(+b.dataset.i < 0 ? null : options[+b.dataset.i].value); else if (e.target === el) done(null); };
@@ -141,9 +141,10 @@ function captureLine(s) {
 }
 
 function mediaTile(m) {
-  const cap = JSON.stringify({ t: m.capturedAt || null, u: m.uploadedAt || null, lat: m.lat, lng: m.lng, acc: m.accuracy });
+  const cap = JSON.stringify({ t: m.capturedAt || null, u: m.uploadedAt || null, lat: m.lat, lng: m.lng, acc: m.accuracy, g: m.source === 'gallery' });
   return `<div class="m" data-view="${esc(m.url)}" data-kind="${m.kind}" data-drive="${esc(m.driveUrl || '')}" data-cap="${esc(cap)}" title="${fmtSize(m.size)}">
     ${m.lat != null ? '<span class="pin" title="Has location">📍</span>' : ''}
+    ${m.source === 'gallery' ? '<span class="src-gal" title="Picked from the phone gallery, not captured live">🖼️ Gallery</span>' : ''}
     ${isSuper() ? `<button class="del-file" data-del-file="${m.id}" aria-label="Delete this ${m.kind === 'video' ? 'video' : 'photo'}" title="Delete this file">${ICON_TRASH}</button>` : ''}
     ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">▶ ${fmtSize(m.size)}</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
   </div>`;
@@ -397,14 +398,17 @@ async function viewBoard() {
 // Requirement summary used in the task list, editor preview and submission cards.
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function reqParts(t) {
-  if (!t.min_photos && !t.min_videos && !t.needs_link) return [{ ic: '📷', text: '1+ photo or video', cls: 'any' }];
+  if (!t.min_photos && !t.min_videos && !t.needs_link) return [{ ic: '📝', text: 'Nothing to upload', cls: 'any' }];
   return [
     t.min_photos ? { ic: '📷', text: plural(t.min_photos, 'photo') } : null,
     t.min_videos ? { ic: '🎥', text: plural(t.min_videos, 'video') } : null,
     t.needs_link ? { ic: '🔗', text: t.link_label || 'Link' } : null,
   ].filter(Boolean);
 }
-const reqPills = t => reqParts(t).map(p => `<span class="req-pill ${p.cls || ''}">${p.ic} ${esc(p.text)}</span>`).join('');
+// Gallery uploads only matter when the task asks for photos/videos.
+const wantsMedia = t => !!(t.min_photos || t.min_videos);
+const galleryPill = t => t.allow_gallery && wantsMedia(t) ? '<span class="req-pill gallery">🖼️ Gallery allowed</span>' : '';
+const reqPills = t => reqParts(t).map(p => `<span class="req-pill ${p.cls || ''}">${p.ic} ${esc(p.text)}</span>`).join('') + galleryPill(t);
 
 // ---------- Task schedule (entered and shown in IST, stored as ms since epoch) ----------
 const IST_OFFSET_MS = 330 * 60 * 1000;
@@ -472,7 +476,7 @@ async function viewTasks() {
 
 // Task editor (create or edit) with submission requirements and a live player preview.
 function editTask(task) {
-  const t = task || { title: '', description: '', points: 10, min_photos: 1, min_videos: 0, needs_link: 0, link_label: '', opens_at: null, closes_at: null };
+  const t = task || { title: '', description: '', points: 10, min_photos: 1, min_videos: 0, needs_link: 0, link_label: '', allow_gallery: 0, opens_at: null, closes_at: null };
   const el = document.createElement('div');
   el.className = 'dlg-scrim';
   el.innerHTML = `
@@ -487,15 +491,14 @@ function editTask(task) {
         <div class="stepper"><span>🎥 Videos required</span><div><button type="button" data-step="min_videos" data-d="-1">−</button><input name="min_videos" type="number" min="0" max="5" value="${t.min_videos}"><button type="button" data-step="min_videos" data-d="1">+</button></div></div>
         <label class="toggle-row"><span>🔗 Link required</span><span class="switch"><input type="checkbox" name="needs_link" ${t.needs_link ? 'checked' : ''}><span></span></span></label>
         <label class="fl link-label ${t.needs_link ? '' : 'hidden'}">Link label (shown to players)<input class="input" name="link_label" maxlength="60" value="${esc(t.link_label)}" placeholder="e.g. Instagram reel link"></label>
-        <p class="muted small hint">Players can't send until every requirement is met. Set everything to 0 with no link to allow "at least 1 photo or video" (the old rule).</p>
+        <label class="toggle-row gallery-row"><span>🖼️ Allow uploads from gallery</span><span class="switch"><input type="checkbox" name="allow_gallery" ${t.allow_gallery ? 'checked' : ''}><span></span></span></label>
       </fieldset>
       <fieldset class="reqset">
         <legend>Schedule <span class="muted small">(optional, IST)</span></legend>
-        <label class="toggle-row"><span>🕒 Only accept submissions during a time window</span><span class="switch"><input type="checkbox" name="scheduled" ${t.opens_at || t.closes_at ? 'checked' : ''}><span></span></span></label>
+        <label class="toggle-row"><span>🕒 Time window</span><span class="switch"><input type="checkbox" name="scheduled" ${t.opens_at || t.closes_at ? 'checked' : ''}><span></span></span></label>
         <div class="sched-fields ${t.opens_at || t.closes_at ? '' : 'hidden'}">
           <label class="fl">Opens at (IST)<input class="input" type="datetime-local" name="opens" value="${toISTInput(t.opens_at)}"></label>
           <label class="fl">Closes at (IST)<input class="input" type="datetime-local" name="closes" value="${toISTInput(t.closes_at)}"></label>
-          <p class="muted small hint">Leave either empty for no limit on that side. Before it opens, players see the task locked with a countdown. After it closes, they can't submit.</p>
           <p class="small sched-err hidden"></p>
         </div>
       </fieldset>
@@ -507,12 +510,13 @@ function editTask(task) {
   const val = () => {
     const d = Object.fromEntries(new FormData(f));
     const on = f.scheduled.checked;
-    return { ...d, points: +d.points || 0, min_photos: Math.max(0, Math.min(12, +d.min_photos || 0)), min_videos: Math.max(0, Math.min(5, +d.min_videos || 0)), needs_link: f.needs_link.checked ? 1 : 0,
+    return { ...d, points: +d.points || 0, min_photos: Math.max(0, Math.min(12, +d.min_photos || 0)), min_videos: Math.max(0, Math.min(5, +d.min_videos || 0)), needs_link: f.needs_link.checked ? 1 : 0, allow_gallery: f.allow_gallery.checked ? 1 : 0,
       opens_at: on ? fromISTInput(f.opens.value) : null, closes_at: on ? fromISTInput(f.closes.value) : null };
   };
   const preview = () => {
     const v = val();
     f.querySelector('.link-label').classList.toggle('hidden', !v.needs_link);
+    f.querySelector('.gallery-row').classList.toggle('hidden', !wantsMedia(v));
     f.querySelector('.sched-fields').classList.toggle('hidden', !f.scheduled.checked);
     const err = v.opens_at && v.closes_at && v.closes_at <= v.opens_at ? 'Closing time must be after the opening time.' : '';
     const errEl = f.querySelector('.sched-err'); errEl.textContent = err; errEl.classList.toggle('hidden', !err);
@@ -527,12 +531,25 @@ function editTask(task) {
     }
     preview();
   };
+  // Closing with unsaved edits asks first: discard, save, or keep editing.
+  let saved = '';
+  let asking = false;
+  const tryClose = async () => {
+    if (asking) return;
+    if (JSON.stringify(val()) === saved) return el.remove();
+    asking = true;
+    const pick = await choose('Unsaved changes', `You've made changes to ${task ? 'this task' : 'this new task'} that haven't been saved.`,
+      [{ label: 'Discard', value: 'discard', kind: 'danger' }, { label: task ? 'Save changes' : 'Add task', value: 'save', kind: 'primary' }], 'Keep editing');
+    asking = false;
+    if (pick === 'discard') el.remove();
+    else if (pick === 'save') f.requestSubmit();
+  };
   f.onclick = e => {
     const st = e.target.closest('[data-step]');
     if (st) { const inp = f[st.dataset.step]; inp.value = Math.max(+inp.min, Math.min(+inp.max, (+inp.value || 0) + +st.dataset.d)); preview(); }
-    if (e.target.closest('[data-close]')) el.remove();
+    if (e.target.closest('[data-close]')) tryClose();
   };
-  el.onclick = e => { if (e.target === el) el.remove(); };
+  el.onclick = e => { if (e.target === el) tryClose(); };
   f.onsubmit = async e => {
     e.preventDefault();
     const v = val();
@@ -545,6 +562,7 @@ function editTask(task) {
     } catch (err) { toast('Error', err.message, 'rejected'); }
   };
   preview();
+  saved = JSON.stringify(val());
   f.title.focus();
 }
 
@@ -760,7 +778,8 @@ document.addEventListener('click', async e => {
     let cap = {};
     try { cap = JSON.parse(v.dataset.cap || '{}'); } catch {}
     const info = [
-      cap.t ? `<span>🕒 Taken ${fmtDateTime(cap.t)}</span>` : '<span>🕒 Capture time unknown</span>',
+      cap.g ? '<span>🖼️ Uploaded from the phone gallery (not captured live)</span>' : '',
+      cap.t ? `<span>🕒 ${cap.g ? 'File date' : 'Taken'} ${fmtDateTime(cap.t)}</span>` : '<span>🕒 Capture time unknown</span>',
       cap.lat != null
         ? `<span>📍 ${coords(cap)} · ±${Math.round(cap.acc || 0)} m · <a href="${mapsUrl(cap)}" target="_blank" rel="noopener">Open in Google Maps</a></span>`
         : '<span>📍 No location shared</span>',

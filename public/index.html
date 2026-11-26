@@ -92,6 +92,30 @@
     .capture { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .capture .btn { min-height: 64px; border-radius: 20px; flex-direction: column; gap: 4px; font-size: 15px; }
     .capture svg { width: 24px; height: 24px; }
+    .slot-sec { display: grid; gap: 8px; }
+    .slot-h { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #6b5410; }
+    .slot-n { font-size: 13px; letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--muted); }
+    .slot-n.ok { color: var(--green); }
+    /* Fixed-size squares that wrap; never stretched by the image inside. */
+    .slot-sec .thumbs { grid-template-columns: repeat(auto-fill, 84px); grid-auto-rows: 84px; gap: 8px; }
+    .slot-sec .thumb { width: 84px; height: 84px; aspect-ratio: auto; min-width: 0; border-radius: 12px; }
+    .slot-sec .thumb .x { top: 4px; right: 4px; width: 24px; height: 24px; font-size: 14px; }
+    .slot-sec .thumb .ok { top: 4px; left: 4px; right: auto; bottom: auto; width: 22px; height: 22px; font-size: 12px; }
+    .slot-sec .thumb .tag { left: 4px; bottom: 4px; font-size: 10px; padding: 1px 6px; max-width: calc(100% - 8px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .slot-sec .thumb .up { padding: 0 8px; gap: 4px; }
+    .slot-sec .thumb .up b { font-size: 14px; }
+    .slot-sec .thumb .up.err { font-size: 10px; }
+    .slot { width: 84px; height: 84px; border: 2px dashed rgba(30,30,30,.45); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; display: grid; place-items: center; align-content: center; gap: 4px; cursor: pointer; padding: 0; transition: transform .06s ease, border-color .15s; }
+    .slot:hover { border-color: var(--ink); }
+    .slot:active { transform: scale(.97); }
+    .slot:disabled { opacity: .5; cursor: default; }
+    .slot svg { width: 22px; height: 22px; }
+    .slot.extra { background: transparent; color: var(--muted); }
+    .slot.extra b { font-size: 20px; line-height: 1; }
+    .src-pick { display: grid; gap: 10px; }
+    .src-pick h3 { margin: 0 0 4px; }
+    .src-pick .btn { gap: 8px; }
+    .src-pick svg { width: 20px; height: 20px; }
     .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .thumb { position: relative; aspect-ratio: 1; border-radius: 14px; overflow: hidden; background: #ddd; }
     .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; }
@@ -289,7 +313,7 @@
     </nav>
   </section>
 
-  <!-- In-app camera: live viewfinder via getUserMedia. There is no file input anywhere, so the gallery can't be used. -->
+  <!-- In-app camera: live viewfinder via getUserMedia. Gallery picks are only offered on tasks that allow them. -->
   <div id="cam" class="cam hidden" role="dialog" aria-modal="true" aria-label="Camera">
     <video id="camView" autoplay playsinline muted></video>
     <div class="cam-flash" id="camFlash"></div>

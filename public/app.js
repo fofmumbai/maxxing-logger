@@ -254,6 +254,7 @@ function uploadItem(d) {
   // Capture details go before the file so the server has them when the upload lands.
   const m = d.meta || {};
   fd.append('captured_at', m.capturedAt ?? '');
+  if (d.source === 'gallery') fd.append('source', 'gallery');
   if (m.lat != null) { fd.append('lat', m.lat); fd.append('lng', m.lng); fd.append('accuracy', m.acc ?? ''); }
   fd.append('media', d.file, d.file.name);
   const xhr = d.xhr = new XMLHttpRequest();
@@ -307,7 +308,7 @@ function updateSendBtn() {
 }
 
 function lockSheet(locked) {
-  document.querySelectorAll('.capture .btn, [data-rm], [data-retry], #closeSheet, #noteInput, #linkInput').forEach(b => (b.disabled = locked));
+  document.querySelectorAll('[data-slot], [data-rm], [data-retry], #closeSheet, #noteInput, #linkInput').forEach(b => (b.disabled = locked));
 }
 
 // ---------- Task schedule ----------
@@ -357,11 +358,8 @@ setInterval(() => {
 }, 1000);
 
 // ---------- Task requirements ----------
-// All zero = legacy rule: at least one photo or video, either kind.
-const isLegacy = t => !t.min_photos && !t.min_videos && !t.needs_link;
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function reqChips(t) {
-  if (isLegacy(t)) return '📷/🎥';
   return [t.min_photos ? `📷 ${t.min_photos}` : '', t.min_videos ? `🎥 ${t.min_videos}` : '', t.needs_link ? '🔗' : ''].filter(Boolean).join(' · ');
 }
 function validLink(v) {
@@ -374,21 +372,58 @@ function reqStatus(t) {
   const photos = draft.filter(d => d.kind === 'image').length, videos = draft.filter(d => d.kind === 'video').length;
   const link = $('#linkInput')?.value || '';
   const rows = [];
-  if (isLegacy(t)) rows.push({ label: 'At least 1 photo or video', have: photos + videos, need: 1, noun: 'photo or video' });
-  else {
-    if (t.min_photos) rows.push({ label: plural(t.min_photos, 'photo'), have: photos, need: t.min_photos, noun: 'photo' });
-    if (t.min_videos) rows.push({ label: plural(t.min_videos, 'video'), have: videos, need: t.min_videos, noun: 'video' });
-    if (t.needs_link) rows.push({ label: t.link_label || 'A link', have: validLink(link) ? 1 : 0, need: 1, isLink: true });
-  }
+  if (t.min_photos) rows.push({ label: plural(t.min_photos, 'photo'), have: photos, need: t.min_photos, noun: 'photo' });
+  if (t.min_videos) rows.push({ label: plural(t.min_videos, 'video'), have: videos, need: t.min_videos, noun: 'video' });
+  if (t.needs_link) rows.push({ label: t.link_label || 'A link', have: validLink(link) ? 1 : 0, need: 1, isLink: true });
   const missing = rows.filter(r => r.have < r.need).map(r => r.isLink ? 'a link' : plural(r.need - r.have, 'more ' + r.noun));
   return { rows, ok: rows.every(r => r.have >= r.need), missing };
 }
 function reqListHtml(t) {
-  const { rows } = reqStatus(t);
-  return `<div class="req" id="reqList"><b class="req-h">What to submit</b>${rows.map(r => {
-    const done = r.have >= r.need;
-    return `<div class="req-row ${done ? 'ok' : ''}"><span class="req-ic">${done ? '✓' : ''}</span><span>${esc(r.label)}</span>${r.isLink ? '' : `<span class="req-n">${Math.min(r.have, r.need)}/${r.need}</span>`}</div>`;
-  }).join('')}</div>`;
+  // Photos and videos are shown as slots (see slotsHtml); this box only appears when nothing is asked for.
+  if (t.min_photos || t.min_videos || t.needs_link) return '';
+  return `<div class="req" id="reqList"><b class="req-h">Nothing to upload</b><span class="muted small">Add a note if you like, then send.</span></div>`;
+}
+
+// One dashed slot per required photo/video. Filled slots show the capture; tap an empty one to add.
+function draftThumb(d) {
+  return `<div class="thumb" data-key="${d.key}">${d.kind === 'video' ? `<video src="${d.url}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${d.url}" alt="">`}
+    <span class="tag">${d.source === 'gallery' ? '🖼️ ' : ''}${d.meta?.lat != null ? '📍 ' : ''}${d.kind === 'video' ? `▶ ${fmtDur(d.duration || 0)} · ` : ''}${fmtMB(d.file.size)}</span>
+    <div class="ov">${overlayHtml(d)}</div>
+    <button class="x" data-rm="${d.key}" aria-label="Remove">×</button></div>`;
+}
+function slotGroupHtml(kind, need) {
+  const items = draft.filter(d => d.kind === (kind === 'photo' ? 'image' : 'video'));
+  const noun = kind === 'photo' ? 'Photo' : 'Video';
+  const done = items.length >= need;
+  const empty = Array.from({ length: Math.max(0, need - items.length) }, (_, i) =>
+    `<button class="slot" data-slot="${kind}">${kind === 'photo' ? ICON_CAM : ICON_VID}<span>${noun} ${items.length + i + 1}</span></button>`).join('');
+  const extra = done && draft.length < MAX_ITEMS ? `<button class="slot extra" data-slot="${kind}"><b>+</b><span>Add more</span></button>` : '';
+  return `<div class="slot-sec">
+    <div class="slot-h"><span>${noun}s</span><span class="slot-n ${done ? 'ok' : ''}">${done ? '✓ ' : ''}${Math.min(items.length, need)}/${need}</span></div>
+    <div class="thumbs">${items.map(draftThumb).join('')}${empty}${extra}</div></div>`;
+}
+function slotsHtml(t) {
+  return (t.min_photos ? slotGroupHtml('photo', t.min_photos) : '') + (t.min_videos ? slotGroupHtml('video', t.min_videos) : '');
+}
+// Empty slot tapped: straight to the camera, or ask camera vs gallery when the task allows the gallery.
+function chooseSource(kind) {
+  const t = state?.tasks.find(x => x.id === openTaskId);
+  if (draft.length >= MAX_ITEMS) return toast(`Max ${MAX_ITEMS} items per submission`);
+  if (!t?.allow_gallery) return capture(kind);
+  const el = document.createElement('div');
+  el.className = 'dlg-scrim';
+  el.innerHTML = `<div class="dlg src-pick" role="dialog" aria-modal="true" aria-label="Add a ${kind}"><h3>Add a ${kind}</h3>
+    <button class="btn block" data-src="cam">${kind === 'photo' ? ICON_CAM + 'Take photo' : ICON_VID + 'Record video'}</button>
+    <button class="btn ghost block" data-src="gal">${ICON_GAL}Choose from gallery</button>
+    <button class="btn ghost block" data-src="">Cancel</button></div>`;
+  el.onclick = e => {
+    const b = e.target.closest('[data-src]');
+    if (!b && e.target !== el) return;
+    el.remove();
+    if (b?.dataset.src === 'cam') capture(kind);
+    if (b?.dataset.src === 'gal') { const inp = $('#galleryInput'); inp.accept = kind === 'photo' ? 'image/*' : 'video/*'; inp.click(); }
+  };
+  document.body.appendChild(el);
 }
 function refreshReq() {
   const t = state?.tasks.find(x => x.id === openTaskId);
@@ -409,6 +444,7 @@ function mediaHtml(list) {
 }
 
 const ICON_CAM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>';
+const ICON_GAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>';
 const ICON_VID = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>';
 
 function renderSheet() {
@@ -436,20 +472,10 @@ function renderSheet() {
       body += `<div class="sched-bar ${win.soon ? 'soon' : ''}">⏳ <b>${cd(win.at, 'clock')}</b> left · closes ${whenIST(win.at)}</div>`;
     }
     if (canSubmit) {
-      const wantPhoto = isLegacy(t) || t.min_photos > 0, wantVideo = isLegacy(t) || t.min_videos > 0;
-      body += reqListHtml(t) + `
-        ${wantPhoto || wantVideo ? `<div class="capture ${wantPhoto && wantVideo ? '' : 'one'}">
-          ${wantPhoto ? `<button class="btn" id="takePhoto">${ICON_CAM}Take photo</button>` : ''}
-          ${wantVideo ? `<button class="btn blue" id="takeVideo">${ICON_VID}Record video</button>` : ''}
-        </div>` : ''}
+      body += reqListHtml(t) + slotsHtml(t) + `
+        ${t.allow_gallery ? `<input type="file" id="galleryInput" class="hidden" multiple>` : ''}
         ${t.needs_link ? `<div class="field"><label for="linkInput">${esc(t.link_label || 'Link')}</label>
           <input id="linkInput" class="input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://" maxlength="500"></div>` : ''}
-        ${draft.length ? `<div class="thumbs">${draft.map(d => `
-          <div class="thumb" data-key="${d.key}">${d.kind === 'video' ? `<video src="${d.url}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${d.url}" alt="">`}
-          <span class="tag">${d.meta?.lat != null ? '📍 ' : ''}${d.kind === 'video' ? `▶ ${fmtDur(d.duration || 0)} · ` : ''}${fmtMB(d.file.size)}</span>
-          <div class="ov">${overlayHtml(d)}</div>
-          <button class="x" data-rm="${d.key}" aria-label="Remove">×</button></div>`).join('')}</div>`
-          : wantPhoto || wantVideo ? `<p class="muted small" style="margin:0">Camera only: capture live with the buttons above, then send.</p>` : ''}
         <textarea id="noteInput" class="input" placeholder="Add a note for the organisers (optional)" maxlength="500"></textarea>
         <button class="btn lime block" id="sendBtn" disabled>Send for review</button>`;
     } else if (!state.submissionsOpen) {
@@ -482,8 +508,8 @@ function renderSheet() {
   // Wrap in arrows: passing closeSheet directly would hand it the click event as "force" and skip the discard prompt.
   $('#scrim').onclick = () => closeSheet();
   $('#closeSheet').onclick = () => closeSheet();
-  $('#takePhoto') && ($('#takePhoto').onclick = () => capture('photo'));
-  $('#takeVideo') && ($('#takeVideo').onclick = () => capture('video'));
+  document.querySelectorAll('[data-slot]').forEach(b => b.onclick = () => chooseSource(b.dataset.slot));
+  if ($('#galleryInput')) $('#galleryInput').onchange = e => { const files = [...e.target.files]; e.target.value = ''; addFromGallery(files); };
   $('#sendBtn') && ($('#sendBtn').onclick = send);
   document.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
     const i = draft.findIndex(d => d.key === +b.dataset.rm);
@@ -503,8 +529,8 @@ function renderSheet() {
 }
 
 // ---------- In-app camera ----------
-// Everything is captured live from getUserMedia. There is no <input type=file>,
-// so on every device there is no way to pick from the gallery.
+// Captures come live from getUserMedia. Picking from the gallery is only offered
+// on tasks where the organisers turned on "Allow uploads from gallery".
 const MAX_VIDEO_SEC = 120;
 const cam = { stream: null, mode: 'photo', facing: 'environment', recorder: null, chunks: [], timer: null, started: 0, startMeta: null };
 
@@ -542,6 +568,10 @@ function updateGeoPill() {
 function capture(mode) {
   if (draft.length >= MAX_ITEMS) return toast(`Max ${MAX_ITEMS} items per submission`);
   cam.mode = mode === 'video' ? 'video' : 'photo';
+  // Only offer the camera modes this task asks for.
+  const t = state?.tasks.find(x => x.id === openTaskId);
+  document.querySelectorAll('.cam-modes button').forEach(b => b.classList.toggle('hidden', !!t && !(b.dataset.mode === 'video' ? t.min_videos : t.min_photos)));
+  $('.cam-modes').classList.toggle('hidden', !!t && !(t.min_photos && t.min_videos));
   $('#cam').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   updateCamUi();
@@ -607,9 +637,9 @@ function updateCamUi() {
   $('#camLast').innerHTML = last ? `<span class="media">${last.kind === 'video' ? `<video src="${last.url}#t=0.1" muted playsinline></video>` : `<img src="${last.url}" alt="">`}</span><b>${draft.length}</b>` : '';
 }
 
-function addCapture(blob, kind, ext, duration = 0, meta = captureMeta()) {
+function addCapture(blob, kind, ext, duration = 0, meta = captureMeta(), source = 'camera') {
   const file = new File([blob], `${kind}-${Date.now()}.${ext}`, { type: blob.type, lastModified: Date.now() });
-  draft.push({ key: ++keySeq, file, url: URL.createObjectURL(file), kind, duration, meta, state: 'queued', progress: 0 });
+  draft.push({ key: ++keySeq, file, url: URL.createObjectURL(file), kind, duration, meta, source, state: 'queued', progress: 0 });
   pump();
   navigator.vibrate?.(30);
   updateCamUi();
@@ -635,7 +665,11 @@ async function takePhoto() {
   const sctx = src.getContext('2d');
   if (cam.facing === 'user') { sctx.translate(src.width, 0); sctx.scale(-1, 1); }
   sctx.drawImage(v, 0, 0, src.width, src.height);
+  const blob = await encodeJpeg(src);
+  if (blob) addCapture(blob, 'image', 'jpg');
+}
 
+async function encodeJpeg(src) {
   let blob = null;
   for (const [scale, q] of PHOTO_STEPS) {
     let c = src;
@@ -648,7 +682,68 @@ async function takePhoto() {
     blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
     if (blob && blob.size <= PHOTO_MAX_BYTES) break;
   }
-  if (blob) addCapture(blob, 'image', 'jpg');
+  return blob;
+}
+
+// ---------- Gallery picks (only on tasks that allow them) ----------
+// Photos are re-encoded like camera shots (≤ 2560px, ≤ 1 MB JPEG). Videos go up as they are.
+// They carry no GPS; the file's own date is sent as the capture time.
+async function decodeImage(file) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch {}
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally { URL.revokeObjectURL(url); }
+}
+function videoDuration(file) {
+  return new Promise(resolve => {
+    const v = document.createElement('video');
+    const url = URL.createObjectURL(file);
+    const done = d => { URL.revokeObjectURL(url); resolve(Number.isFinite(d) ? d : 0); };
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => done(v.duration);
+    v.onerror = () => done(0);
+    setTimeout(() => done(0), 5000);
+    v.src = url;
+  });
+}
+async function addFromGallery(files) {
+  const t = state?.tasks.find(x => x.id === openTaskId);
+  if (!t?.allow_gallery) return;
+  const wantPhoto = t.min_photos > 0, wantVideo = t.min_videos > 0;
+  let skipped = 0;
+  for (let f of files) {
+    if (draft.length >= MAX_ITEMS) break; // addCapture already said so
+    const type = f.type || ({ mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/mp4', '3gp': 'video/3gpp', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', heic: 'image/heic', heif: 'image/heif', webp: 'image/webp' })[f.name.split('.').pop().toLowerCase()] || '';
+    if (type && !f.type) f = new File([f], f.name, { type, lastModified: f.lastModified });
+    const kind = type.startsWith('video/') ? 'video' : type.startsWith('image/') ? 'image' : '';
+    if (!kind || (kind === 'image' && !wantPhoto) || (kind === 'video' && !wantVideo)) { skipped++; continue; }
+    const meta = { capturedAt: f.lastModified || null, lat: null, lng: null, acc: null };
+    if (kind === 'video') {
+      addCapture(f, 'video', (f.name.split('.').pop() || 'mp4').toLowerCase().slice(0, 5), await videoDuration(f), meta, 'gallery');
+      continue;
+    }
+    let blob = null;
+    try {
+      const img = await decodeImage(f);
+      const w = img.width, h = img.height, scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      img.close?.();
+      blob = await encodeJpeg(c);
+    } catch {}
+    // Couldn't decode it here (e.g. HEIC on some browsers): send the original file.
+    if (blob) addCapture(blob, 'image', 'jpg', 0, meta, 'gallery');
+    else addCapture(f, 'image', (f.name.split('.').pop() || 'jpg').toLowerCase().slice(0, 5), 0, meta, 'gallery');
+  }
+  if (skipped) toast(`${skipped} file${skipped === 1 ? '' : 's'} skipped`, wantPhoto ? 'This task only takes photos.' : 'This task only takes videos.');
+  renderSheet();
 }
 
 function pickVideoType() {

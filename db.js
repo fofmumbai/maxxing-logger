@@ -78,10 +78,10 @@ for (const [col, def] of [['drive_id', 'TEXT'], ['drive_error', 'TEXT'], ['drive
 }
 db.exec(`CREATE TABLE IF NOT EXISTS drive_folders (key TEXT PRIMARY KEY, id TEXT NOT NULL)`);
 
-// What each task asks players to submit (all zero = legacy rule: at least one photo or video).
+// What each task asks players to submit. 0 photos / 0 videos means no photo / video is asked for.
 {
   const cols = db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name);
-  for (const [col, def] of [['min_photos', 'INTEGER NOT NULL DEFAULT 0'], ['min_videos', 'INTEGER NOT NULL DEFAULT 0'], ['needs_link', 'INTEGER NOT NULL DEFAULT 0'], ['link_label', "TEXT NOT NULL DEFAULT ''"], ['opens_at', 'INTEGER'], ['closes_at', 'INTEGER']]) {
+  for (const [col, def] of [['min_photos', 'INTEGER NOT NULL DEFAULT 0'], ['min_videos', 'INTEGER NOT NULL DEFAULT 0'], ['needs_link', 'INTEGER NOT NULL DEFAULT 0'], ['link_label', "TEXT NOT NULL DEFAULT ''"], ['allow_gallery', 'INTEGER NOT NULL DEFAULT 0'], ['opens_at', 'INTEGER'], ['closes_at', 'INTEGER']]) {
     if (!cols.includes(col)) db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`);
   }
   const scols = db.prepare('PRAGMA table_info(submissions)').all().map(c => c.name);
@@ -89,7 +89,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS drive_folders (key TEXT PRIMARY KEY, id TEXT
 }
 
 // Capture details sent by the phone: when it was taken and where (GPS), plus when the server received it.
-const CAPTURE_COLS = [['captured_at', 'INTEGER'], ['lat', 'REAL'], ['lng', 'REAL'], ['accuracy', 'REAL'], ['uploaded_at', 'INTEGER']];
+// source: 'camera' (captured live in the app) or 'gallery' (picked from the phone's library, only on tasks that allow it).
+const CAPTURE_COLS = [['captured_at', 'INTEGER'], ['lat', 'REAL'], ['lng', 'REAL'], ['accuracy', 'REAL'], ['uploaded_at', 'INTEGER'], ['source', "TEXT NOT NULL DEFAULT 'camera'"]];
 for (const table of ['uploads', 'media']) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
   for (const [col, def] of CAPTURE_COLS) if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
@@ -139,8 +140,17 @@ if (db.prepare('SELECT COUNT(*) n FROM teams').get().n === 0) {
   })();
 }
 if (db.prepare('SELECT COUNT(*) n FROM tasks').get().n === 0) {
-  const ins = db.prepare('INSERT INTO tasks (title, description, points, sort) VALUES (?, ?, ?, ?)');
+  const ins = db.prepare('INSERT INTO tasks (title, description, points, sort, min_photos) VALUES (?, ?, ?, ?, 1)');
   db.transaction(() => seedTasks.forEach(([t, d, p], i) => ins.run(t, d, p, i + 1)))();
+}
+
+// One-time: tasks saved with 0 photos, 0 videos and no link used to mean "at least 1 photo or video".
+// That rule is gone (0 now means none), so those tasks become "1 photo" once to keep their camera button.
+if (!db.prepare("SELECT 1 FROM settings WHERE key = 'zeroMeansNone'").get()) {
+  db.transaction(() => {
+    db.prepare('UPDATE tasks SET min_photos = 1 WHERE min_photos = 0 AND min_videos = 0 AND needs_link = 0').run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('zeroMeansNone', 'true')").run();
+  })();
 }
 
 function getSetting(key, fallback) {

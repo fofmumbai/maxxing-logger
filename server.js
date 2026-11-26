@@ -127,14 +127,14 @@ function mediaFor(subIds) {
     id: m.id, url: '/media/' + m.filename, kind: m.kind, mime: m.mime, size: m.size,
     driveUrl: m.drive_id ? `https://drive.google.com/file/d/${m.drive_id}/view` : null,
     capturedAt: m.captured_at, uploadedAt: m.uploaded_at,
-    lat: m.lat, lng: m.lng, accuracy: m.accuracy,
+    lat: m.lat, lng: m.lng, accuracy: m.accuracy, source: m.source || 'camera',
   }));
   return out;
 }
 function teamState(teamId) {
   const team = db.prepare(`${scoreSql} WHERE t.id = ?`).get(teamId);
   const members = db.prepare('SELECT id, name, created_at FROM members WHERE team_id = ? ORDER BY id').all(teamId);
-  const tasks = db.prepare('SELECT id, title, description, points, min_photos, min_videos, needs_link, link_label, opens_at, closes_at FROM tasks ORDER BY sort, id').all();
+  const tasks = db.prepare('SELECT id, title, description, points, min_photos, min_videos, needs_link, link_label, allow_gallery, opens_at, closes_at FROM tasks ORDER BY sort, id').all();
   const subs = db.prepare(`
     SELECT s.*, m.name AS member_name, k.title AS task_title, k.points
     FROM submissions s LEFT JOIN members m ON m.id = s.member_id JOIN tasks k ON k.id = s.task_id
@@ -212,6 +212,7 @@ function captureMeta(body) {
     lat: hasPos ? lat : null,
     lng: hasPos ? lng : null,
     accuracy: hasPos ? num(body.accuracy, 0, 1e6) : null, // metres
+    source: body.source === 'gallery' ? 'gallery' : 'camera',
   };
 }
 
@@ -226,9 +227,9 @@ app.post('/api/uploads', teamAuth, (req, res) => {
     }
     if (!f) return res.status(400).json({ error: 'Only photos and videos can be uploaded.' });
     const g = captureMeta(req.body);
-    const r = db.prepare('INSERT INTO uploads (member_id, team_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    const r = db.prepare('INSERT INTO uploads (member_id, team_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(req.member.id, req.member.team_id, f.filename, f.mimetype, f.mimetype.startsWith('video/') ? 'video' : 'image', f.size,
-        g.captured_at, g.lat, g.lng, g.accuracy, Date.now());
+        g.captured_at, g.lat, g.lng, g.accuracy, Date.now(), g.source);
     res.json({ id: r.lastInsertRowid, size: f.size });
   });
 });
@@ -261,8 +262,6 @@ function cleanLink(v) {
 // Returns a human list of what's missing ("1 photo, a link"), or '' when the task's requirements are met.
 function missingRequirements(task, ups, link) {
   const photos = ups.filter(u => u.kind === 'image').length, videos = ups.filter(u => u.kind === 'video').length;
-  const legacy = !task.min_photos && !task.min_videos && !task.needs_link;
-  if (legacy) return ups.length ? '' : 'at least 1 photo or video';
   const out = [];
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   if (photos < task.min_photos) out.push(plural(task.min_photos - photos, 'more photo'));
@@ -281,6 +280,7 @@ app.post('/api/submissions', teamAuth, (req, res) => {
   const teamId = req.member.team_id;
   const ups = ids.length ? db.prepare(`SELECT * FROM uploads WHERE team_id = ? AND id IN (${ids.map(() => '?').join(',')})`).all(teamId, ...ids) : [];
   if (ups.length !== ids.length) return res.status(400).json({ error: 'Some files are missing. Please capture them again.' });
+  if (!task.allow_gallery && ups.some(u => u.source === 'gallery')) return res.status(400).json({ error: 'This task only accepts photos and videos taken with the in-app camera.' });
   const link = cleanLink(req.body.link);
   if (req.body.link && String(req.body.link).trim() && !link) return res.status(400).json({ error: 'That link doesn\'t look right. Paste a full link starting with https://' });
   const win = windowError(task);
@@ -294,11 +294,11 @@ app.post('/api/submissions', teamAuth, (req, res) => {
   const subId = db.transaction(() => {
     const r = db.prepare('INSERT INTO submissions (team_id, task_id, member_id, note, link) VALUES (?, ?, ?, ?, ?)')
       .run(teamId, taskId, req.member.id, String(req.body.note || '').slice(0, 500), link);
-    const ins = db.prepare('INSERT INTO media (submission_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const ins = db.prepare('INSERT INTO media (submission_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const del = db.prepare('DELETE FROM uploads WHERE id = ?');
     // Keep the order the player captured them in.
     ids.map(id => ups.find(u => u.id === id)).forEach(u => {
-      ins.run(r.lastInsertRowid, u.filename, u.mime, u.kind, u.size, u.captured_at, u.lat, u.lng, u.accuracy, u.uploaded_at);
+      ins.run(r.lastInsertRowid, u.filename, u.mime, u.kind, u.size, u.captured_at, u.lat, u.lng, u.accuracy, u.uploaded_at, u.source || 'camera');
       del.run(u.id);
     });
     return r.lastInsertRowid;
@@ -573,6 +573,7 @@ function cleanTask(b) {
     min_videos: int(b.min_videos, 5),
     needs_link: b.needs_link === true || b.needs_link === 1 || b.needs_link === '1' || b.needs_link === 'on' ? 1 : 0,
     link_label: String(b.link_label || '').trim().slice(0, 60),
+    allow_gallery: b.allow_gallery === true || b.allow_gallery === 1 || b.allow_gallery === '1' || b.allow_gallery === 'on' ? 1 : 0,
   };
   if (t.min_photos + t.min_videos > MAX_FILES) t.min_photos = MAX_FILES - t.min_videos;
   const ms = v => { const n = Number(v); return Number.isFinite(n) && n > 1.5e12 && n < 4e12 ? Math.round(n) : null; };
@@ -586,8 +587,8 @@ app.post('/api/admin/tasks', adminAuth, superOnly, (req, res) => {
   const bad = taskError(t);
   if (bad) return res.status(400).json({ error: bad });
   const sort = (db.prepare('SELECT MAX(sort) m FROM tasks').get().m || 0) + 1;
-  db.prepare('INSERT INTO tasks (title, description, points, sort, min_photos, min_videos, needs_link, link_label, opens_at, closes_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(t.title, t.description, t.points, sort, t.min_photos, t.min_videos, t.needs_link, t.link_label, t.opens_at, t.closes_at);
+  db.prepare('INSERT INTO tasks (title, description, points, sort, min_photos, min_videos, needs_link, link_label, allow_gallery, opens_at, closes_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(t.title, t.description, t.points, sort, t.min_photos, t.min_videos, t.needs_link, t.link_label, t.allow_gallery, t.opens_at, t.closes_at);
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
@@ -595,8 +596,8 @@ app.put('/api/admin/tasks/:id', adminAuth, superOnly, (req, res) => {
   const t = cleanTask(req.body);
   const bad = taskError(t);
   if (bad) return res.status(400).json({ error: bad });
-  db.prepare('UPDATE tasks SET title = ?, description = ?, points = ?, min_photos = ?, min_videos = ?, needs_link = ?, link_label = ?, opens_at = ?, closes_at = ? WHERE id = ?')
-    .run(t.title, t.description, t.points, t.min_photos, t.min_videos, t.needs_link, t.link_label, t.opens_at, t.closes_at, req.params.id);
+  db.prepare('UPDATE tasks SET title = ?, description = ?, points = ?, min_photos = ?, min_videos = ?, needs_link = ?, link_label = ?, allow_gallery = ?, opens_at = ?, closes_at = ? WHERE id = ?')
+    .run(t.title, t.description, t.points, t.min_photos, t.min_videos, t.needs_link, t.link_label, t.allow_gallery, t.opens_at, t.closes_at, req.params.id);
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });
@@ -654,7 +655,7 @@ app.get('/api/admin/export.csv', adminAuth, superOnly, (req, res) => {
     SELECT t.name team, k.title task, k.points, s.status, s.comment, s.reviewed_by, m.name member, s.link,
       datetime(s.created_at, 'unixepoch', '+330 minutes') submitted_at_ist, datetime(s.reviewed_at, 'unixepoch', '+330 minutes') reviewed_at_ist,
       (SELECT group_concat(
-         md.kind || ' ' || COALESCE(strftime('%Y-%m-%d %H:%M:%S', md.captured_at / 1000, 'unixepoch', '+330 minutes') || ' IST', 'time unknown') || ' @ ' ||
+         md.kind || CASE WHEN md.source = 'gallery' THEN ' (gallery)' ELSE '' END || ' ' || COALESCE(strftime('%Y-%m-%d %H:%M:%S', md.captured_at / 1000, 'unixepoch', '+330 minutes') || ' IST', 'time unknown') || ' @ ' ||
          CASE WHEN md.lat IS NULL THEN 'no location' ELSE printf('%.6f,%.6f (±%dm)', md.lat, md.lng, CAST(COALESCE(md.accuracy, 0) AS INTEGER)) END, ' | ')
        FROM media md WHERE md.submission_id = s.id) media_capture
     FROM submissions s JOIN teams t ON t.id = s.team_id JOIN tasks k ON k.id = s.task_id LEFT JOIN members m ON m.id = s.member_id ORDER BY s.id`).all();
