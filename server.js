@@ -260,7 +260,7 @@ app.post('/api/join', (req, res) => {
 
 app.get('/api/me', teamAuth, (req, res) => {
   res.json({ me: { id: req.member.id, name: req.member.name, selfie: req.member.selfie ? '/media/' + req.member.selfie : null }, serverNow: Date.now(),
-    ...teamState(req.member.team_id), checkin: checkinForTeam(req.member.team_id, req.member.id) });
+    ...teamState(req.member.team_id), checkin: checkinForTeam(req.member.team_id, req.member.id), drafts: draftsFor(req.member.id) });
 });
 
 // Player scanned the venue QR code.
@@ -329,9 +329,10 @@ app.post('/api/uploads', teamAuth, (req, res) => {
     }
     if (!f) return res.status(400).json({ error: 'Only photos and videos can be uploaded.' });
     const g = captureMeta(req.body);
-    const r = db.prepare('INSERT INTO uploads (member_id, team_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    const dur = parseFloat(req.body.duration);
+    const r = db.prepare('INSERT INTO uploads (member_id, team_id, filename, mime, kind, size, captured_at, lat, lng, accuracy, uploaded_at, source, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(req.member.id, req.member.team_id, f.filename, f.mimetype, f.mimetype.startsWith('video/') ? 'video' : 'image', f.size,
-        g.captured_at, g.lat, g.lng, g.accuracy, Date.now(), g.source);
+        g.captured_at, g.lat, g.lng, g.accuracy, Date.now(), g.source, Number.isFinite(dur) && dur > 0 && dur < 36000 ? dur : null);
     res.json({ id: r.lastInsertRowid, size: f.size });
   });
 });
@@ -345,14 +346,59 @@ app.post('/api/me/selfie', teamAuth, (req, res) => {
       return res.status(400).json({ error: err?.code === 'LIMIT_FILE_SIZE' ? `Photo is larger than ${MAX_FILE_MB} MB.` : err?.message || 'Send a photo.' });
     }
     const g = captureMeta(req.body);
-    const old = req.member.selfie;
-    db.prepare(`UPDATE members SET selfie = ?, selfie_size = ?, selfie_captured_at = ?, selfie_lat = ?, selfie_lng = ?, selfie_accuracy = ?, selfie_uploaded_at = ? WHERE id = ?`)
+    const old = db.prepare('SELECT selfie, selfie_drive_id FROM members WHERE id = ?').get(req.member.id);
+    db.prepare(`UPDATE members SET selfie = ?, selfie_size = ?, selfie_captured_at = ?, selfie_lat = ?, selfie_lng = ?, selfie_accuracy = ?, selfie_uploaded_at = ?,
+      selfie_drive_id = NULL, selfie_drive_error = NULL, selfie_drive_attempts = 0, selfie_drive_next_try = 0 WHERE id = ?`)
       .run(f.filename, f.size, g.captured_at, g.lat, g.lng, g.accuracy, Date.now(), req.member.id);
-    if (old) fs.unlink(path.join(UPLOAD_DIR, old), () => {});
+    if (old?.selfie) fs.unlink(path.join(UPLOAD_DIR, old.selfie), () => {});
+    if (old?.selfie_drive_id) drive.trash([old.selfie_drive_id]); // a retake replaces the Drive copy too
+    drive.kick();
     toTeam(req.member.team_id, 'refresh', {});
     toAdmins('reviewed', { teamId: req.member.team_id }); // refreshes the team list and that team's page
     res.json({ selfie: '/media/' + f.filename });
   });
+});
+
+// ---------- Saved drafts ----------
+function draftsFor(memberId) {
+  const rows = db.prepare('SELECT task_id, note, link, saved_at FROM drafts WHERE member_id = ?').all(memberId);
+  const ups = db.prepare('SELECT * FROM uploads WHERE member_id = ? AND task_id IS NOT NULL ORDER BY id').all(memberId);
+  return rows.map(d => ({
+    taskId: d.task_id, note: d.note, link: d.link, savedAt: d.saved_at,
+    items: ups.filter(u => u.task_id === d.task_id).map(u => ({
+      id: u.id, url: '/media/' + u.filename, kind: u.kind, size: u.size, duration: u.duration || 0,
+      capturedAt: u.captured_at, lat: u.lat, lng: u.lng, accuracy: u.accuracy, source: u.source || 'camera',
+    })),
+  }));
+}
+function dropDraft(memberId, taskId) {
+  const ups = db.prepare('SELECT id, filename FROM uploads WHERE member_id = ? AND task_id = ?').all(memberId, taskId);
+  db.prepare('DELETE FROM uploads WHERE member_id = ? AND task_id = ?').run(memberId, taskId);
+  ups.forEach(u => fs.unlink(path.join(UPLOAD_DIR, u.filename), () => {}));
+  db.prepare('DELETE FROM drafts WHERE member_id = ? AND task_id = ?').run(memberId, taskId);
+}
+// Save (or replace) this player's draft for a task: which uploads, plus the note and link typed so far.
+app.put('/api/drafts/:taskId', teamAuth, (req, res) => {
+  const taskId = +req.params.taskId;
+  if (!db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId)) return res.status(404).json({ error: 'Task not found.' });
+  const ids = [...new Set((Array.isArray(req.body.upload_ids) ? req.body.upload_ids : []).map(Number).filter(Boolean))].slice(0, MAX_FILES);
+  const mine = ids.length ? db.prepare(`SELECT id FROM uploads WHERE member_id = ? AND id IN (${ids.map(() => '?').join(',')})`).all(req.member.id, ...ids) : [];
+  if (mine.length !== ids.length) return res.status(400).json({ error: 'Some files are missing. Please capture them again.' });
+  const note = String(req.body.note || '').slice(0, 500), link = String(req.body.link || '').slice(0, 500);
+  db.transaction(() => {
+    // Files dropped from this draft since the last save are deleted.
+    const gone = db.prepare(`SELECT id, filename FROM uploads WHERE member_id = ? AND task_id = ? ${ids.length ? `AND id NOT IN (${ids.map(() => '?').join(',')})` : ''}`).all(req.member.id, taskId, ...ids);
+    gone.forEach(u => { db.prepare('DELETE FROM uploads WHERE id = ?').run(u.id); fs.unlink(path.join(UPLOAD_DIR, u.filename), () => {}); });
+    if (ids.length) db.prepare(`UPDATE uploads SET task_id = ? WHERE id IN (${ids.map(() => '?').join(',')})`).run(taskId, ...ids);
+    if (!ids.length && !note.trim() && !link.trim()) db.prepare('DELETE FROM drafts WHERE member_id = ? AND task_id = ?').run(req.member.id, taskId);
+    else db.prepare('INSERT INTO drafts (member_id, task_id, note, link, saved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(member_id, task_id) DO UPDATE SET note = excluded.note, link = excluded.link, saved_at = excluded.saved_at')
+      .run(req.member.id, taskId, note, link, Date.now());
+  })();
+  res.json({ ok: true, drafts: draftsFor(req.member.id) });
+});
+app.delete('/api/drafts/:taskId', teamAuth, (req, res) => {
+  dropDraft(req.member.id, +req.params.taskId);
+  res.json({ ok: true });
 });
 
 // Player removed a captured item before sending.
@@ -422,6 +468,7 @@ app.post('/api/submissions', teamAuth, (req, res) => {
       ins.run(r.lastInsertRowid, u.filename, u.mime, u.kind, u.size, u.captured_at, u.lat, u.lng, u.accuracy, u.uploaded_at, u.source || 'camera');
       del.run(u.id);
     });
+    db.prepare('DELETE FROM drafts WHERE member_id = ? AND task_id = ?').run(req.member.id, taskId);
     return r.lastInsertRowid;
   })();
 
@@ -431,9 +478,10 @@ app.post('/api/submissions', teamAuth, (req, res) => {
   res.json({ ok: true, id: subId });
 });
 
-// Remove uploads that were never sent (abandoned captures) after 12 hours.
+// Remove uploads that were never sent (abandoned captures) after 12 hours. Saved drafts are kept.
 setInterval(() => {
-  const old = db.prepare(`SELECT * FROM uploads WHERE created_at < unixepoch() - 43200`).all();
+  const old = db.prepare(`SELECT * FROM uploads WHERE created_at < unixepoch() - 43200
+    AND (task_id IS NULL OR NOT EXISTS (SELECT 1 FROM drafts d WHERE d.member_id = uploads.member_id AND d.task_id = uploads.task_id))`).all();
   old.forEach(u => { db.prepare('DELETE FROM uploads WHERE id = ?').run(u.id); fs.unlink(path.join(UPLOAD_DIR, u.filename), () => {}); });
 }, 60 * 60 * 1000);
 
@@ -624,9 +672,10 @@ function deleteSubmissions(subIds) {
 
 // Remove a member. ?withMedia=1 also deletes every submission they sent (and its photos/videos).
 app.delete('/api/admin/members/:id', adminAuth, superOnly, (req, res) => {
-  const m = db.prepare('SELECT team_id, selfie FROM members WHERE id = ?').get(req.params.id);
+  const m = db.prepare('SELECT team_id, selfie, selfie_drive_id FROM members WHERE id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Member not found' });
   if (m.selfie) fs.unlink(path.join(UPLOAD_DIR, m.selfie), () => {});
+  if (m.selfie_drive_id) drive.trash([m.selfie_drive_id]);
   let files = 0;
   db.transaction(() => {
     if (req.query.withMedia === '1') {
@@ -649,7 +698,9 @@ app.delete('/api/admin/teams/:id', adminAuth, superOnly, (req, res) => {
   db.transaction(() => {
     files = deleteSubmissions(db.prepare('SELECT id FROM submissions WHERE team_id = ?').all(t.id).map(r => r.id));
     db.prepare('SELECT filename FROM uploads WHERE team_id = ?').all(t.id).forEach(u => fs.unlink(path.join(UPLOAD_DIR, u.filename), () => {}));
-    db.prepare('SELECT selfie FROM members WHERE team_id = ? AND selfie IS NOT NULL').all(t.id).forEach(m => fs.unlink(path.join(UPLOAD_DIR, m.selfie), () => {}));
+    const selfies = db.prepare('SELECT selfie, selfie_drive_id FROM members WHERE team_id = ? AND selfie IS NOT NULL').all(t.id);
+    selfies.forEach(m => fs.unlink(path.join(UPLOAD_DIR, m.selfie), () => {}));
+    drive.trash(selfies.filter(m => m.selfie_drive_id).map(m => m.selfie_drive_id));
     // Forget its Drive folders so a future team that reuses this id gets fresh ones.
     db.prepare("DELETE FROM drive_folders WHERE key = ? OR key LIKE ?").run(`team:${t.id}`, `team:${t.id}:%`);
     db.prepare('DELETE FROM teams WHERE id = ?').run(t.id); // members, submissions and uploads cascade

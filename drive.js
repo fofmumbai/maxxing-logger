@@ -2,6 +2,7 @@
 //
 // Flow: phones upload to this server (fast, with progress) → once a submission is sent, its files are
 // copied in the background into Google Drive, organised as  <root folder>/<Team>/<#n Task>/...
+// Onboarding pictures go to <root folder>/Onboarding pictures/<Team>/<player name>.jpg and also stay on this server.
 // After Drive confirms a file, the local copy is deleted. The dashboard keeps using /media/<file>; that
 // route streams from Drive (with Range support, so videos can seek) when the local copy is gone.
 //
@@ -219,29 +220,50 @@ async function uploadMedia(m) {
   const ext = path.extname(m.filename) || (m.kind === 'video' ? '.mp4' : '.jpg');
   const name = `attempt-${info.attempt}_${m.kind === 'video' ? 'video' : 'photo'}-${info.item_no}${ext}`;
 
-  // Resumable upload: streams the file from disk, fine for large videos.
-  const localPath = path.join(UPLOAD_DIR, m.filename);
+  return uploadFile(path.join(UPLOAD_DIR, m.filename), m.mime, name, taskFolder, [
+    `Mumbai Maxxing · ${info.team_name} · ${info.task_title} · submission ${info.sub_id}`,
+    ...captureLines(m.captured_at, m.lat, m.lng, m.accuracy),
+  ]);
+}
+
+const captureLines = (at, lat, lng, acc) => [
+  at ? `Captured: ${new Date(at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST` : 'Captured: time unknown',
+  lat != null ? `Location: ${lat.toFixed(6)}, ${lng.toFixed(6)} (±${Math.round(acc || 0)} m) https://maps.google.com/?q=${lat},${lng}` : 'Location: not shared',
+];
+
+// Resumable upload: streams the file from disk, fine for large videos.
+async function uploadFile(localPath, mime, name, parent, descriptionLines) {
   const size = fs.statSync(localPath).size;
   const init = await gapi('/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': m.mime, 'X-Upload-Content-Length': String(size) },
-    body: JSON.stringify({ name, parents: [taskFolder], description: [
-      `Mumbai Maxxing · ${info.team_name} · ${info.task_title} · submission ${info.sub_id}`,
-      m.captured_at ? `Captured: ${new Date(m.captured_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST` : 'Captured: time unknown',
-      m.lat != null ? `Location: ${m.lat.toFixed(6)}, ${m.lng.toFixed(6)} (±${Math.round(m.accuracy || 0)} m) https://maps.google.com/?q=${m.lat},${m.lng}` : 'Location: not shared',
-    ].join('\n') }),
+    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': mime, 'X-Upload-Content-Length': String(size) },
+    body: JSON.stringify({ name, parents: [parent], description: descriptionLines.join('\n') }),
   });
   const session = init.headers.get('location');
   if (!session) throw new Error('Drive did not return an upload session');
   const put = await fetch(session, {
     method: 'PUT',
-    headers: { 'Content-Type': m.mime, 'Content-Length': String(size) },
+    headers: { 'Content-Type': mime, 'Content-Length': String(size) },
     body: Readable.toWeb(fs.createReadStream(localPath)),
     duplex: 'half',
   });
   const out = await put.json().catch(() => ({}));
   if (!put.ok || !out.id) throw new Error(`Drive upload failed (${put.status}): ${out.error?.message || ''}`);
   return out.id;
+}
+
+// ---------- Upload one onboarding picture ----------
+async function uploadSelfie(m) {
+  const team = db.prepare('SELECT id, name FROM teams WHERE id = ?').get(m.team_id);
+  if (!team) throw new Error('Team no longer exists');
+  // One "Onboarding pictures" folder for the event, with a subfolder per team.
+  const onboarding = await ensureFolder('onboarding', 'Onboarding pictures', rootId());
+  const folder = await ensureFolder(`team:${team.id}:onboarding`, clean(team.name), onboarding);
+  const ext = path.extname(m.selfie) || '.jpg';
+  return uploadFile(path.join(UPLOAD_DIR, m.selfie), 'image/jpeg', clean(m.name) + ext, folder, [
+    `Mumbai Maxxing · ${team.name} · onboarding picture · ${m.name}`,
+    ...captureLines(m.selfie_captured_at, m.selfie_lat, m.selfie_lng, m.selfie_accuracy),
+  ]);
 }
 
 // ---------- Background worker ----------
@@ -253,8 +275,14 @@ function pending() {
   return db.prepare(`SELECT * FROM media WHERE drive_id IS NULL AND local_deleted = 0 AND drive_attempts < ? AND drive_next_try <= unixepoch() ORDER BY id LIMIT 20`).all(MAX_ATTEMPTS);
 }
 
+function pendingSelfies() {
+  return db.prepare(`SELECT * FROM members WHERE selfie IS NOT NULL AND selfie_drive_id IS NULL AND selfie_drive_attempts < ? AND selfie_drive_next_try <= unixepoch() ORDER BY id LIMIT 20`).all(MAX_ATTEMPTS);
+}
+const backoff = attempts => Math.min(600, 15 * 2 ** (attempts - 1)); // 15s, 30s, 1m … capped at 10 min
+
 function work() {
   if (!isReady()) return;
+  workSelfies();
   for (const m of pending()) {
     if (running >= PARALLEL) break;
     if (inFlight.has(m.id)) continue;
@@ -273,7 +301,7 @@ function work() {
       })
       .catch(err => {
         const attempts = m.drive_attempts + 1;
-        const wait = Math.min(600, 15 * 2 ** (attempts - 1)); // 15s, 30s, 1m … capped at 10 min
+        const wait = backoff(attempts);
         db.prepare('UPDATE media SET drive_error = ?, drive_attempts = ?, drive_next_try = unixepoch() + ? WHERE id = ?').run(err.message.slice(0, 500), attempts, wait, m.id);
         status.lastError = err.message;
         if (err.status === 401 || err.status === 403) status.connected = false;
@@ -281,6 +309,36 @@ function work() {
       })
       .finally(() => {
         running--; inFlight.delete(m.id);
+        onChange.forEach(fn => fn());
+        setImmediate(work);
+      });
+  }
+}
+
+function workSelfies() {
+  for (const m of pendingSelfies()) {
+    if (running >= PARALLEL) break;
+    const key = 'selfie:' + m.id;
+    if (inFlight.has(key)) continue;
+    inFlight.add(key);
+    running++;
+    uploadSelfie(m)
+      .then(id => {
+        // Only if it's still the same picture (not retaken or removed while uploading).
+        const r = db.prepare('UPDATE members SET selfie_drive_id = ?, selfie_drive_error = NULL WHERE id = ? AND selfie = ?').run(id, m.id, m.selfie);
+        if (!r.changes) { trash([id]); return; }
+        Object.assign(status, { connected: true, lastOkAt: Date.now(), lastError: '' });
+      })
+      .catch(err => {
+        const attempts = m.selfie_drive_attempts + 1;
+        db.prepare('UPDATE members SET selfie_drive_error = ?, selfie_drive_attempts = ?, selfie_drive_next_try = unixepoch() + ? WHERE id = ? AND selfie = ?')
+          .run(err.message.slice(0, 500), attempts, backoff(attempts), m.id, m.selfie);
+        status.lastError = err.message;
+        if (err.status === 401 || err.status === 403) status.connected = false;
+        console.error(`Google Drive: onboarding picture of member ${m.id} failed (attempt ${attempts}): ${err.message}`);
+      })
+      .finally(() => {
+        running--; inFlight.delete(key);
         onChange.forEach(fn => fn());
         setImmediate(work);
       });
@@ -310,11 +368,17 @@ function counts() {
       SUM(drive_id IS NULL AND local_deleted = 0 AND drive_attempts < ?) waiting,
       SUM(drive_id IS NULL AND drive_attempts >= ?) failed
     FROM media`).get(MAX_ATTEMPTS, MAX_ATTEMPTS);
-  return { synced: r.synced || 0, waiting: r.waiting || 0, failed: r.failed || 0 };
+  const s = db.prepare(`SELECT
+      SUM(selfie_drive_id IS NOT NULL) synced,
+      SUM(selfie_drive_id IS NULL AND selfie_drive_attempts < ?) waiting,
+      SUM(selfie_drive_id IS NULL AND selfie_drive_attempts >= ?) failed
+    FROM members WHERE selfie IS NOT NULL`).get(MAX_ATTEMPTS, MAX_ATTEMPTS);
+  return { synced: (r.synced || 0) + (s.synced || 0), waiting: (r.waiting || 0) + (s.waiting || 0), failed: (r.failed || 0) + (s.failed || 0) };
 }
 
 function retryFailed() {
   db.prepare('UPDATE media SET drive_attempts = 0, drive_next_try = 0 WHERE drive_id IS NULL AND local_deleted = 0').run();
+  db.prepare('UPDATE members SET selfie_drive_attempts = 0, selfie_drive_next_try = 0 WHERE selfie IS NOT NULL AND selfie_drive_id IS NULL').run();
   kick();
 }
 

@@ -52,12 +52,15 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 
 // ---------- API ----------
 async function api(path, opts = {}) {
+  const sentWith = token;
   const res = await fetch(path, {
     ...opts,
     headers: { ...(opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...opts.headers },
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && token) { logout(); throw new Error(data.error || 'Please join again'); }
+  // Only sign out if this device is still on the session that was rejected: a slow request from an
+  // older session finishing after a new join must not sign the new one out.
+  if (res.status === 401 && token && token === sentWith) { logout(); throw new Error(data.error || 'Please join again'); }
   if (!res.ok) throw new Error(data.error || 'Something went wrong');
   return data;
 }
@@ -69,6 +72,19 @@ function toast(title, body = '', kind = '') {
   el.onclick = () => el.remove();
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), kind ? 7000 : 3500);
+}
+
+// Popup with several labelled choices; resolves to the chosen value, or null for the last (cancel) button / tap outside.
+// buttons: [{ label, value, kind: 'primary' | 'danger' | 'ghost' }]
+function chooseBox(title, body, buttons) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'dlg-scrim';
+    el.innerHTML = `<div class="dlg" role="alertdialog" aria-modal="true" aria-label="${esc(title)}"><h3>${esc(title)}</h3><p>${body}</p>
+      <div class="dlg-actions stack">${buttons.map((b, i) => `<button class="btn ${b.kind === 'danger' ? 'coral' : b.kind === 'ghost' ? 'ghost' : 'blue'}" data-i="${i}">${esc(b.label)}</button>`).join('')}</div></div>`;
+    el.onclick = e => { const b = e.target.closest('[data-i]'); if (b || e.target === el) { el.remove(); resolve(b ? buttons[+b.dataset.i].value : null); } };
+    document.body.appendChild(el);
+  });
 }
 
 // ---------- Join ----------
@@ -91,12 +107,24 @@ $('#joinForm').onsubmit = async e => {
   } finally { btn.disabled = false; }
 };
 
+// Exactly one of the three screens (join, permissions/onboarding, app) is ever on the page.
+function showScreen(name) {
+  for (const s of ['join', 'perms', 'app']) $('#' + s).classList.toggle('hidden', s !== name);
+  window.scrollTo(0, 0);
+}
+
 function logout() {
   token = null; state = null;
   store.del('mm_token');
   es?.close(); es = null;
-  $('#app').classList.add('hidden');
-  $('#join').classList.remove('hidden');
+  // Close anything open over the app (camera, scanner, task sheet) before going back to the join page.
+  try { if (!$('#cam').classList.contains('hidden')) { stopStream(); stopGeo(); $('#cam').classList.add('hidden'); } } catch {}
+  try { stopScanner(); $('#scan').classList.add('hidden'); } catch {}
+  try { stopSelfie(); } catch {}
+  $('#sheetHost').innerHTML = '';
+  openTaskId = null;
+  document.body.style.overflow = '';
+  showScreen('join');
 }
 
 // ---------- Derived state ----------
@@ -144,7 +172,7 @@ function render() {
       <span class="ic ${status}">${(status === 'todo' || status === 'rejected') && taskWindow(t).state === 'upcoming' ? icon('lock') : STATUS_ICON[status]}</span>
       <div>
         <h3>${esc(t.title)}</h3>
-        <div class="sub ${status}">#${tasks.indexOf(t) + 1}${status === 'todo' ? '' : ' · ' + STATUS_LABEL[status]}<span class="req-chips">${reqChips(t)}</span></div>
+        <div class="sub ${status}">#${tasks.indexOf(t) + 1}${status === 'todo' ? '' : ' · ' + STATUS_LABEL[status]}<span class="req-chips">${reqChips(t)}</span>${savedDraft(t.id) && (status === 'todo' || status === 'rejected') ? `<span class="draft-chip">${icon('note')}Draft saved</span>` : ''}</div>
         ${schedLine(t, status)}
       </div>
       <span class="pill pts">+${t.points}</span>
@@ -211,18 +239,85 @@ function setTab(t) {
 }
 
 // ---------- Task sheet ----------
+const savedDraft = taskId => state?.drafts?.find(d => d.taskId === taskId);
+// A draft only matters while the team can still send this task (not in review or approved).
+const canDraft = taskId => ['todo', 'rejected'].includes(taskStatus(taskId).status);
+
 function openTask(id) {
-  if (openTaskId !== id) { clearDraft(); }
+  let restore = null;
+  if (openTaskId !== id) {
+    clearDraft();
+    // Bring back captures saved for later on this task (already uploaded, so nothing to redo).
+    restore = canDraft(id) ? savedDraft(id) : null;
+    if (restore) draft = restore.items.map(it => ({
+      key: ++keySeq, file: { size: it.size, name: '' }, url: it.url, kind: it.kind, duration: it.duration,
+      meta: { capturedAt: it.capturedAt, lat: it.lat, lng: it.lng, acc: it.accuracy }, source: it.source,
+      state: 'done', progress: 1, uploadId: it.id, saved: true,
+    }));
+  }
   openTaskId = id;
   renderSheet();
+  if (restore) {
+    if ($('#noteInput')) $('#noteInput').value = restore.note;
+    if ($('#linkInput')) { $('#linkInput').value = restore.link; refreshReq(); }
+    updateSendBtn();
+  }
 }
 async function closeSheet(force = false) {
   if (sending && !force) return;
-  if (!force && draft.length && !await confirmBox('Discard your captures?', draft.length > 1 ? `You have <b>${draft.length} photos/videos</b> that haven't been sent. They'll be deleted.` : `You have <b>1 photo/video</b> that hasn't been sent. It'll be deleted.`, 'Discard', true)) return;
+  const taskId = openTaskId;
+  const hadSaved = !!savedDraft(taskId);
+  const note = $('#noteInput')?.value.trim() || '', link = $('#linkInput')?.value.trim() || '';
+  // Everything removed from a saved draft: drop it quietly.
+  if (!force && hadSaved && !draft.length && !note && !link) {
+    api('/api/drafts/' + taskId, { method: 'DELETE' }).catch(() => {});
+    state.drafts = state.drafts.filter(d => d.taskId !== taskId);
+  } else if (!force && canDraft(taskId) && (draft.length || note || link)) {
+    const n = draft.length;
+    const what = n ? `<b>${n} photo${n === 1 ? '' : 's'}/video${n === 1 ? '' : 's'}</b>` : 'a note or link';
+    const choice = await chooseBox('Save for later?', `You have ${what} on this task that ${n === 1 || !n ? "hasn't" : "haven't"} been sent. Save ${n === 1 || !n ? 'it' : 'them'} here to finish later, or discard.`, [
+      { label: 'Save for later', value: 'save', kind: 'primary' },
+      { label: 'Discard', value: 'discard', kind: 'danger' },
+      { label: 'Keep editing', value: null, kind: 'ghost' },
+    ]);
+    if (!choice) return;
+    if (choice === 'save') return saveDraft(taskId);
+    if (hadSaved) api('/api/drafts/' + taskId, { method: 'DELETE' }).catch(() => {});
+    state.drafts = (state.drafts || []).filter(d => d.taskId !== taskId);
+  }
   clearDraft();
+  shutSheet();
+}
+function shutSheet() {
   openTaskId = null;
   $('#sheetHost').innerHTML = '';
   document.body.style.overflow = '';
+  if (state) render();
+}
+
+// Keep this task's captures, note and link on the server so the player can finish it later.
+async function saveDraft(taskId) {
+  draft.filter(d => d.state === 'error').forEach(d => { d.state = 'queued'; d.progress = 0; paintItem(d); });
+  sending = true;
+  lockSheet(true);
+  pump();
+  while (draft.some(d => d.state === 'queued' || d.state === 'uploading')) await new Promise(r => setTimeout(r, 250));
+  sending = false;
+  if (draft.some(d => d.state === 'error')) {
+    lockSheet(false); updateSendBtn();
+    return toast("Couldn't save", 'Some uploads failed. Check your connection, then try again.', 'rejected');
+  }
+  try {
+    const r = await api('/api/drafts/' + taskId, { method: 'PUT', body: JSON.stringify({
+      upload_ids: draft.map(d => d.uploadId), note: $('#noteInput')?.value || '', link: $('#linkInput')?.value || '' }) });
+    state.drafts = r.drafts;
+    clearDraft(false);
+    shutSheet();
+    toast('Saved for later', 'Open the task again to finish and send it.');
+  } catch (err) {
+    lockSheet(false); updateSendBtn();
+    toast("Couldn't save", err.message, 'rejected');
+  }
 }
 // discardOnServer=false after a successful send (files now belong to the submission).
 function clearDraft(discardOnServer = true) {
@@ -230,7 +325,7 @@ function clearDraft(discardOnServer = true) {
     d.removed = true;
     d.xhr?.abort();
     if (discardOnServer && d.uploadId) api('/api/uploads/' + d.uploadId, { method: 'DELETE' }).catch(() => {});
-    URL.revokeObjectURL(d.url);
+    if (d.url.startsWith('blob:')) URL.revokeObjectURL(d.url);
   });
   draft = [];
 }
@@ -258,6 +353,7 @@ function uploadItem(d) {
   const m = d.meta || {};
   fd.append('captured_at', m.capturedAt ?? '');
   if (d.source === 'gallery') fd.append('source', 'gallery');
+  if (d.duration) fd.append('duration', d.duration);
   if (m.lat != null) { fd.append('lat', m.lat); fd.append('lng', m.lng); fd.append('accuracy', m.acc ?? ''); }
   fd.append('media', d.file, d.file.name);
   const xhr = d.xhr = new XMLHttpRequest();
@@ -919,7 +1015,8 @@ async function queryPerm(name) {
 }
 async function refreshPerms() {
   const [c, m, g] = await Promise.all([queryPerm('camera'), queryPerm('microphone'), queryPerm('geolocation')]);
-  if (c !== 'unknown') perm.cam = c === 'granted' && m !== 'denied' ? (m === 'granted' || m === 'unknown' ? 'granted' : 'prompt') : c;
+  // The camera row covers camera + microphone (videos need both): blocked if either is blocked.
+  if (c !== 'unknown') perm.cam = c === 'denied' || m === 'denied' ? 'denied' : c === 'granted' && (m === 'granted' || m === 'unknown') ? 'granted' : 'prompt';
   if (g !== 'unknown') perm.geo = g;
   perm.notif = !('Notification' in window) ? 'unsupported' : Notification.permission === 'default' ? 'prompt' : Notification.permission;
 }
@@ -973,7 +1070,6 @@ const needsOnboarding = () => !!state && !state.me.selfie;
 
 function renderPerms() {
   const camOk = perm.cam === 'granted';
-  const geoOk = ['granted', 'granted-weak', 'unsupported'].includes(perm.geo);
   const allDone = ['cam', 'geo', 'notif'].every(k => perm[k] !== 'prompt' && perm[k] !== 'unknown');
   const onboarding = needsOnboarding();
   $('#perms').innerHTML = `
@@ -981,13 +1077,13 @@ function renderPerms() {
       <p class="muted">Allow these once now, so nothing interrupts you mid-task.</p></div>
     <div class="card pr-list">
       ${permRow('cam', 'Camera & microphone', 'To take photos and record videos for tasks.', true)}
-      ${permRow('geo', 'Location', 'Proves where each photo was taken. Organisers may reject submissions without it.', true)}
+      ${permRow('geo', 'Location', 'Proves where each photo was taken. Organisers may reject task submissions without it.', false)}
       ${permRow('notif', 'Notifications', 'Get alerted when organisers approve or reject.', false)}
     </div>
-    ${onboarding && camOk && geoOk ? '' : `<button class="btn blue block" id="permAllow">${allDone ? 'Check again' : 'Allow all'}</button>`}
+    ${onboarding && camOk && allDone ? '' : `<button class="btn blue block" id="permAllow">${allDone ? 'Check again' : 'Allow all'}</button>`}
     ${onboarding
-      ? `<button class="btn ${camOk && geoOk ? 'blue' : 'ghost'} block" id="permDone" ${camOk && geoOk ? '' : 'disabled'}>Next: onboarding task${icon('arrow-right')}</button>
-         ${camOk && geoOk ? '' : '<p class="muted small" style="text-align:center; margin:0">Camera and location are needed to join in.</p>'}`
+      ? `<button class="btn ${camOk ? 'blue' : 'ghost'} block" id="permDone" ${camOk ? '' : 'disabled'}>Next: onboarding task${icon('arrow-right')}</button>
+         ${camOk ? '' : '<p class="muted small" style="text-align:center; margin:0">Allow the camera and microphone to continue.</p>'}`
       : `<button class="btn ${camOk ? '' : 'ghost'} block" id="permDone">${camOk ? `Let's go${icon('arrow-right')}` : 'Skip for now'}</button>`}
     ${allDone ? '' : '<p class="muted small" style="text-align:center; margin:0">Your phone will show its own pop-ups. Tap <b>Allow</b> on each.</p>'}`;
   if ($('#permAllow')) $('#permAllow').onclick = async e => {
@@ -1181,13 +1277,13 @@ function updateSelfieGeo() {
   if (!el) return;
   const fresh = geo.last && Date.now() - geo.last.at < GEO_MAX_AGE;
   const [cls, txt] = fresh ? ['on', `Location on · ±${Math.round(geo.last.acc || 0)} m`]
-    : geo.status === 'denied' ? ['bad', 'Location is blocked. Allow it to submit.']
+    : geo.status === 'denied' ? ['bad', 'Location is off. You can still submit.']
       : geo.status === 'unavailable' ? ['', 'No location on this device']
         : ['', 'Finding your location…'];
   el.className = 'selfie-geo ' + cls;
   el.innerHTML = icon('pin') + esc(txt);
   const use = $('#selfieUse');
-  if (use) use.disabled = !selfie.blob || geo.status === 'denied' || selfie.busy;
+  if (use) use.disabled = !selfie.blob || selfie.busy;
 }
 
 function resetSelfieShot() {
@@ -1198,7 +1294,6 @@ function stopSelfie() { stopGeo(); }
 
 async function uploadSelfie() {
   if (selfie.busy || !selfie.blob) return;
-  if (geo.status === 'denied') return toast('Allow location first', 'Go back to permissions to fix it.');
   selfie.busy = true;
   const btn = $('#selfieUse');
   btn.disabled = true; btn.textContent = 'Saving…';
@@ -1227,14 +1322,12 @@ async function uploadSelfie() {
 
 async function openPerms() {
   await refreshPerms();
-  $('#perms').classList.remove('hidden');
-  $('#app').classList.add('hidden');
-  window.scrollTo(0, 0);
+  if (!token) return; // signed out while checking
+  showScreen('perms');
   renderPerms();
 }
 function closePerms() {
-  $('#perms').classList.add('hidden');
-  $('#app').classList.remove('hidden');
+  showScreen('app');
   renderTeam();
 }
 
@@ -1243,11 +1336,11 @@ async function load() {
 }
 
 async function boot() {
-  if (!token) { $('#join').classList.remove('hidden'); return; }
+  if (!token) { showScreen('join'); return; }
   await load();
   if (!state) { if (token) setTimeout(boot, 4000); return; } // offline: retry
-  $('#join').classList.add('hidden');
-  $('#app').classList.remove('hidden');
+  // New members go straight to onboarding (no flash of the task list first).
+  showScreen(needsOnboarding() || !store.get('mm_perms_' + state.me.id) ? 'perms' : 'app');
   connect();
   // New member: permissions, then a selfie, before the task list (once per member, on any device).
   // Already onboarded but first time on this device: just re-check permissions.

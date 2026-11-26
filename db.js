@@ -100,10 +100,30 @@ for (const table of ['uploads', 'media']) {
 // Proves camera (and location) access works on their phone, and gives organisers a face for each name.
 {
   const cols = db.prepare('PRAGMA table_info(members)').all().map(c => c.name);
-  for (const [col, def] of [['selfie', 'TEXT'], ['selfie_size', 'INTEGER'], ['selfie_captured_at', 'INTEGER'], ['selfie_lat', 'REAL'], ['selfie_lng', 'REAL'], ['selfie_accuracy', 'REAL'], ['selfie_uploaded_at', 'INTEGER']]) {
+  for (const [col, def] of [['selfie', 'TEXT'], ['selfie_size', 'INTEGER'], ['selfie_captured_at', 'INTEGER'], ['selfie_lat', 'REAL'], ['selfie_lng', 'REAL'], ['selfie_accuracy', 'REAL'], ['selfie_uploaded_at', 'INTEGER'],
+    // Copied to Google Drive like task media (the local file is kept: it's every avatar in the apps).
+    ['selfie_drive_id', 'TEXT'], ['selfie_drive_error', 'TEXT'], ['selfie_drive_attempts', 'INTEGER NOT NULL DEFAULT 0'], ['selfie_drive_next_try', 'INTEGER NOT NULL DEFAULT 0']]) {
     if (!cols.includes(col)) db.exec(`ALTER TABLE members ADD COLUMN ${col} ${def}`);
   }
 }
+
+// Saved drafts: captures a player kept for later on a task ("Save for later" when closing the task).
+// The files stay in uploads, tagged with the task; the note and link are kept here.
+{
+  const cols = db.prepare('PRAGMA table_info(uploads)').all().map(c => c.name);
+  if (!cols.includes('task_id')) db.exec('ALTER TABLE uploads ADD COLUMN task_id INTEGER');
+  if (!cols.includes('duration')) db.exec('ALTER TABLE uploads ADD COLUMN duration REAL');
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS drafts (
+  member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  note TEXT NOT NULL DEFAULT '',
+  link TEXT NOT NULL DEFAULT '',
+  saved_at INTEGER NOT NULL,
+  PRIMARY KEY (member_id, task_id)
+);
+`);
 
 // End-of-day check-in: one row per member who scanned the venue QR code (or was marked in by an organiser).
 db.exec(`
