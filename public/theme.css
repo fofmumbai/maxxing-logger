@@ -260,9 +260,9 @@ body.admin .seg button.on { background: var(--ink); color: var(--yellow); }
 body.admin .bar { background: var(--cream); box-shadow: inset 0 0 0 1.5px var(--line); }
 body.admin .bar i { background: var(--wf-green); }
 body.admin .trow.st-pending-row { box-shadow: inset 5px 0 0 var(--wf-pink), var(--hard); }
-body.admin .lbrow:nth-child(1) .rank { background: var(--yellow); box-shadow: inset 0 0 0 2px var(--ink); }
-body.admin .lbrow:nth-child(2) .rank { background: var(--wf-blue); color: #fff; }
-body.admin .lbrow:nth-child(3) .rank { background: var(--wf-pink); color: #fff; }
+body.admin .lbrow:nth-child(2) .rank { background: var(--yellow); box-shadow: inset 0 0 0 2px var(--ink); }
+body.admin .lbrow:nth-child(3) .rank { background: var(--wf-blue); color: #fff; }
+body.admin .lbrow:nth-child(4) .rank { background: var(--wf-pink); color: #fff; }
 body.admin .switch input:checked + span { background: var(--wf-green); }
 body.admin #login .wm { width: 220px; height: auto; }
 body.admin .sub .team { color: var(--wf-blue); }

@@ -106,6 +106,27 @@ function teamScope(req, col) {
   return ids.length ? { sql: `${col} IN (${ids.map(() => '?').join(',')})`, args: ids } : { sql: '0', args: [] };
 }
 
+// ---------- Event switches ----------
+// Team leaderboard ("Board" tab) is switched off for now. Flip to true to bring back the admin toggle's effect.
+const TEAM_LEADERBOARD_AVAILABLE = false;
+const leaderboardForTeams = () => TEAM_LEADERBOARD_AVAILABLE && getSetting('showLeaderboard', false);
+
+// Submissions can be set to close automatically at a time (ms). When it passes, they're switched off
+// and the timer is cleared, so an organiser can switch them back on by hand afterwards.
+function autoCloseSubmissions() {
+  const at = getSetting('submissionsCloseAt', null);
+  if (!at || Date.now() < at) return;
+  setSetting('submissionsCloseAt', null);
+  if (getSetting('submissionsOpen', true)) {
+    setSetting('submissionsOpen', false);
+    setSetting('submissionsAutoClosedAt', at);
+    console.log(`Submissions closed automatically at ${new Date(at).toISOString()}`);
+    toAllTeams('refresh', {});
+    toAdmins('teams', {});
+  }
+}
+setInterval(autoCloseSubmissions, 5000);
+
 // ---------- Queries ----------
 const scoreSql = `
   SELECT t.id, t.name, t.code,
@@ -189,7 +210,7 @@ function checkinForTeam(teamId, memberId) {
   const cfg = checkinConfig();
   const t = checkinTeams(cfg).get(teamId) || { members: [], total: 0, done: 0, arrivedAt: null, lateMin: 0, penalty: 0 };
   return {
-    open: cfg.open, deadline: cfg.deadline, perMinute: cfg.perMinute, started: !!cfg.openedAt,
+    open: cfg.open, deadline: cfg.deadline, perMinute: cfg.perMinute, started: !!cfg.openedAt, closedAt: cfg.closedAt,
     meAt: memberId ? t.members.find(m => m.id === memberId)?.at ?? null : null,
     done: t.done, total: t.total, arrivedAt: t.arrivedAt, arrivedBy: t.arrivedBy ?? null, lateMin: t.lateMin, penalty: t.penalty,
     members: t.members.map(m => ({ id: m.id, at: m.at })),
@@ -229,8 +250,9 @@ function teamState(teamId) {
   subs.forEach(s => (s.media = media[s.id] || []));
   return {
     team, members, tasks, submissions: subs, maxMembers: MAX_MEMBERS,
-    showLeaderboard: getSetting('showLeaderboard', false),
+    showLeaderboard: leaderboardForTeams(),
     submissionsOpen: getSetting('submissionsOpen', true),
+    submissionsCloseAt: getSetting('submissionsCloseAt', null),
   };
 }
 
@@ -274,12 +296,12 @@ app.post('/api/checkin', teamAuth, (req, res) => {
   if (!already) db.prepare('INSERT INTO checkins (member_id, team_id, at, method) VALUES (?, ?, ?, ?)').run(req.member.id, req.member.team_id, Date.now(), 'qr');
   toTeam(req.member.team_id, 'refresh', {});
   toAdmins('checkin', { teamId: req.member.team_id });
-  if (getSetting('showLeaderboard', false)) toAllTeams('leaderboard', {});
+  if (leaderboardForTeams()) toAllTeams('leaderboard', {});
   res.json({ ok: true, checkin: checkinForTeam(req.member.team_id, req.member.id) });
 });
 
 app.get('/api/leaderboard', teamAuth, (req, res) => {
-  if (!getSetting('showLeaderboard', false)) return res.status(403).json({ error: 'Leaderboard is hidden right now.' });
+  if (!leaderboardForTeams()) return res.status(403).json({ error: 'Leaderboard is hidden right now.' });
   res.json(leaderboard());
 });
 
@@ -439,6 +461,7 @@ function missingRequirements(task, ups, link) {
 
 // Step 2: Send attaches the already-uploaded files to a new submission.
 app.post('/api/submissions', teamAuth, (req, res) => {
+  autoCloseSubmissions(); // don't accept a send that lands just after the timer, before the next check
   if (!getSetting('submissionsOpen', true)) return res.status(403).json({ error: 'Submissions are closed.' });
   const taskId = parseInt(req.body.task_id, 10);
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
@@ -576,8 +599,11 @@ app.get('/api/admin/summary', adminAuth, (req, res) => {
   c.forEach(r => (counts[r.status] = r.n));
   res.json({
     counts,
-    showLeaderboard: getSetting('showLeaderboard', false),
+    showLeaderboard: leaderboardForTeams(),
     submissionsOpen: getSetting('submissionsOpen', true),
+    submissionsCloseAt: getSetting('submissionsCloseAt', null),
+    submissionsAutoClosedAt: getSetting('submissionsAutoClosedAt', null),
+    teamLeaderboardAvailable: TEAM_LEADERBOARD_AVAILABLE,
   });
 });
 
@@ -614,7 +640,7 @@ app.post('/api/admin/submissions/:id/review', adminAuth, (req, res) => {
   const task = db.prepare('SELECT title, points FROM tasks WHERE id = ?').get(sub.task_id);
   toTeam(sub.team_id, 'review', { submissionId: sub.id, status, comment, task: task.title, points: task.points });
   toAdmins('reviewed', { id: sub.id, teamId: sub.team_id });
-  if (getSetting('showLeaderboard', false)) toAllTeams('leaderboard', {});
+  if (leaderboardForTeams()) toAllTeams('leaderboard', {});
   res.json({ ok: true });
 });
 
@@ -857,6 +883,12 @@ app.post('/api/admin/checkin/reset', adminAuth, superOnly, (req, res) => {
 
 app.post('/api/admin/settings', adminAuth, superOnly, (req, res) => {
   for (const k of ['showLeaderboard', 'submissionsOpen']) if (typeof req.body[k] === 'boolean') setSetting(k, req.body[k]);
+  if (req.body.submissionsCloseAt !== undefined) {
+    const at = req.body.submissionsCloseAt === null ? null : Number(req.body.submissionsCloseAt);
+    if (at !== null && (!Number.isFinite(at) || at <= Date.now())) return res.status(400).json({ error: 'Pick a time in the future.' });
+    setSetting('submissionsCloseAt', at);
+  }
+  if (req.body.submissionsOpen === true) setSetting('submissionsAutoClosedAt', null);
   toAllTeams('refresh', {});
   res.json({ ok: true });
 });

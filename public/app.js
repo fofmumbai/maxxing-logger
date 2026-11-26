@@ -137,7 +137,18 @@ function taskStatus(taskId) {
 }
 
 function lastSeen() { return +(store.get('mm_seen_' + state.me.id) || 0); }
-function unreadCount() { const t = lastSeen(); return state.submissions.filter(s => s.reviewed_at && s.reviewed_at > t).length; }
+function unreadCount() {
+  const t = lastSeen(), c = checkinUpdate();
+  return state.submissions.filter(s => s.reviewed_at && s.reviewed_at > t).length + (c && c.at > t ? 1 : 0);
+}
+// The team's end-of-day check-in as an entry in Updates (at = unix seconds, like submissions).
+function checkinUpdate() {
+  const c = state?.checkin;
+  if (!c?.started) return null;
+  if (c.arrivedAt) return { at: Math.floor(c.arrivedAt / 1000), late: c.lateMin, penalty: c.penalty, by: c.arrivedBy, time: c.arrivedAt, deadline: c.deadline };
+  if (c.closedAt && c.penalty) return { at: Math.floor(c.closedAt / 1000), missed: true, late: c.lateMin, penalty: c.penalty, deadline: c.deadline };
+  return null;
+}
 
 // ---------- Render ----------
 function render() {
@@ -150,6 +161,10 @@ function render() {
   $('#boardBtn').classList.toggle('hidden', !state.showLeaderboard);
   if (!state.showLeaderboard && tab === 'board') setTab('tasks');
   renderCheckinBar();
+  // Submissions closed, or closing on a timer the organisers set.
+  $('#subsNotice').innerHTML = !state.submissionsOpen
+    ? `<div class="sched-bar closed subs-notice">${icon('lock')}<b>Submissions are closed</b></div>`
+    : state.submissionsCloseAt ? `<div class="sched-bar ${state.submissionsCloseAt - now() < 15 * 60000 ? 'soon' : ''} subs-notice">${icon('timer')}<b>${cd(state.submissionsCloseAt, 'clock')}</b> left · submissions close at ${whenIST(state.submissionsCloseAt)}</div>` : '';
 
   const n = unreadCount();
   $('#unreadDot').textContent = n;
@@ -185,13 +200,23 @@ function render() {
 
 function renderUpdates() {
   const seen = lastSeen();
-  const subs = [...state.submissions].sort((a, b) => (b.reviewed_at || b.created_at) - (a.reviewed_at || a.created_at));
-  $('#updateList').innerHTML = subs.length ? subs.map(s => `
+  const items = state.submissions.map(s => ({ at: s.reviewed_at || s.created_at, html: `
     <div class="update card ${s.reviewed_at && s.reviewed_at > seen ? 'unread' : ''}" data-task="${s.task_id}">
       <div class="meta"><b>${esc(s.task_title)}</b><span class="pill st-${s.status}">${STATUS_LABEL[s.status]}${s.status === 'approved' ? ' · +' + s.points : ''}</span></div>
       ${s.comment ? `<div>“${esc(s.comment)}”</div>` : ''}
       <div class="muted small">${s.status === 'pending' ? 'Sent' : 'Reviewed'} ${ago(s.reviewed_at || s.created_at)} · by ${esc(s.member_name || 'a member')} · ${s.media.length} file${s.media.length === 1 ? '' : 's'}</div>
-    </div>`).join('') : `<div class="empty">No submissions yet. Pick a task and capture it!</div>`;
+    </div>` }));
+  const c = checkinUpdate();
+  if (c) items.push({ at: c.at, html: `
+    <div class="update card ci-update ${c.at > seen ? 'unread' : ''}">
+      <div class="meta"><b>${icon('pin')}End-of-day check-in</b>${c.penalty ? `<span class="pill st-rejected">−${c.penalty} pts</span>` : '<span class="pill st-approved">On time</span>'}</div>
+      <div>${c.missed
+        ? `Your team didn't check in before check-in closed. That counts as ${c.late} min late.`
+        : `Checked in at <b>${fmtClock(c.time)}</b> by ${esc(c.by || 'a teammate')}. ${c.late ? `That's ${c.late} min after the ${fmtClock(c.deadline)} deadline.` : `Before the ${fmtClock(c.deadline)} deadline.`}`}</div>
+      <div class="muted small">${c.penalty ? `${c.penalty} points taken off your team's score` : 'No points lost'} · ${ago(c.at)}</div>
+    </div>` });
+  items.sort((a, b) => b.at - a.at);
+  $('#updateList').innerHTML = items.length ? items.map(i => i.html).join('') : `<div class="empty">No submissions yet. Pick a task and capture it!</div>`;
 }
 
 function renderTeam() {
@@ -1120,6 +1145,7 @@ function renderPerms() {
 // ---------- End-of-day check-in ----------
 // While organisers have check-in open, a banner floats at the top. Each member scans the QR code on the
 // organisers' screen at the venue. It's not a task: it has its own banner and scanner.
+let ciDeadlineTimer = null;
 function renderCheckinBar() {
   const el = $('#checkinBar');
   const c = state?.checkin;
@@ -1128,6 +1154,9 @@ function renderCheckinBar() {
   const late = c.arrivedAt ? c.lateMin : Math.max(0, Math.ceil((now() - c.deadline) / 60000));
   const pts = late * c.perMinute;
   if (!c.arrivedAt) {
+    // Turn red the moment the deadline passes, not at the next 10-second refresh.
+    clearTimeout(ciDeadlineTimer);
+    if (!late && c.deadline > now()) ciDeadlineTimer = setTimeout(renderCheckinBar, c.deadline - now() + 100);
     el.className = 'ci-bar todo' + (late ? ' late' : '');
     el.innerHTML = `<div class="wrap ci-in"><span class="ci-ic">${icon('pin')}</span>
       <div class="ci-txt"><b>Check-in is open</b><span>${late

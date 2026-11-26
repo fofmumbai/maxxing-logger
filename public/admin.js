@@ -407,9 +407,15 @@ async function viewQueue() {
 // ---------- Leaderboard ----------
 async function viewBoard() {
   const rows = await api('/api/admin/leaderboard');
+  // Final = points from approved tasks minus the late check-in penalty (ranked by final).
   paint(`<div class="toolbar"><h2>Leaderboard</h2></div>
-    <div class="card">${rows.map((r, i) => `
-      <a class="lbrow" ${isSuper() || me.teamIds.includes(r.id) ? `href="#/team/${r.id}"` : ''} style="${i ? 'border-top:1px solid var(--line)' : ''}"><span class="rank">${i + 1}</span><span class="name">${esc(r.name)}${isSuper() ? `<span class="lbstat">${r.approved} approved · ${r.pending} to review</span>` : ''}</span><span class="pill pts" style="font-size:16px">${r.points}</span></a>`).join('')}</div>`);
+    <div class="card lb">
+      <div class="lbhead"><span class="rank"></span><span class="name">Team</span><span class="lbnum">Tasks</span><span class="lbnum">Late</span><span class="lbnum fin">Final</span></div>
+      ${rows.map(r => `
+      <a class="lbrow" ${isSuper() || me.teamIds.includes(r.id) ? `href="#/team/${r.id}"` : ''}><span class="rank">${rows.indexOf(r) + 1}</span><span class="name">${esc(r.name)}${isSuper() ? `<span class="lbstat">${r.approved} approved · ${r.pending} to review</span>` : ''}</span>
+        <span class="lbnum" title="Points from approved tasks">${r.task_points}</span>
+        <span class="lbnum ${r.penalty ? 'pen' : 'zero'}" title="Late check-in penalty">${r.penalty ? '−' + r.penalty : '0'}</span>
+        <span class="lbnum fin"><span class="pill pts">${r.points}</span></span></a>`).join('')}</div>`);
 }
 
 // ---------- Tasks editor ----------
@@ -869,6 +875,15 @@ async function refreshQrStats() {
   } catch {}
 }
 
+let settingsTick = null;
+const istDayIfNotToday = ms => { const d = new Date(ms).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' }); return d === new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' }) ? '' : ', ' + d; };
+const nextHourIST = () => Math.ceil(Date.now() / 3600000) * 3600000;
+function leftText(at) {
+  const s = Math.max(0, Math.round((at - Date.now()) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return s ? (h ? `${h}h ${m}m left` : m ? `${m}m ${sec}s left` : `${sec}s left`) : 'turning off…';
+}
+
 async function viewSettings() {
   if (!isSuper()) {
     paint(`
@@ -886,8 +901,20 @@ async function viewSettings() {
   paint(`
     <div style="display:grid; gap:12px; max-width:720px">
       <h2 style="font-size:28px">Settings</h2>
-      <label class="card setting"><div><b>Show leaderboard to teams</b><div class="muted small">Teams see a live "Board" tab with all scores.</div></div><span class="switch"><input type="checkbox" id="setBoard" ${s.showLeaderboard ? 'checked' : ''}><span></span></span></label>
-      <label class="card setting"><div><b>Accept submissions</b><div class="muted small">Turn off when time's up. Teams can still see their results.</div></div><span class="switch"><input type="checkbox" id="setOpen" ${s.submissionsOpen ? 'checked' : ''}><span></span></span></label>
+      <label class="card setting ${s.teamLeaderboardAvailable ? '' : 'is-off'}"><div><b>Show leaderboard to teams</b>${s.teamLeaderboardAvailable ? '' : '<span class="soon">Coming soon</span>'}<div class="muted small">Teams see a live "Board" tab with all scores.</div></div><span class="switch"><input type="checkbox" id="setBoard" ${s.teamLeaderboardAvailable && s.showLeaderboard ? 'checked' : ''} ${s.teamLeaderboardAvailable ? '' : 'disabled'}><span></span></span></label>
+      <div class="card sub-card">
+        <label class="setting"><div><b>Turn off submissions</b><div class="muted small">${s.submissionsOpen ? 'Off: teams can send tasks. Switch on when time\'s up.' : '<b>On: teams can\'t send tasks.</b> They can still see their results.'}</div></div><span class="switch"><input type="checkbox" id="setOpen" ${s.submissionsOpen ? '' : 'checked'}><span></span></span></label>
+        <div class="auto-close">
+          <div><b>Auto turn off</b><div class="muted small">${s.submissionsCloseAt
+            ? `Submissions turn off at <b>${istTime(s.submissionsCloseAt)} IST</b>${istDayIfNotToday(s.submissionsCloseAt)} · <span data-left="${s.submissionsCloseAt}">${leftText(s.submissionsCloseAt)}</span>. Teams see a countdown.`
+            : s.submissionsAutoClosedAt && !s.submissionsOpen ? `Turned off automatically at ${istTime(s.submissionsAutoClosedAt)} IST.` : 'Set a time and submissions switch off by themselves.'}</div></div>
+          <div class="auto-row">
+            <input class="input sm" type="datetime-local" id="closeAt" value="${toISTInput(s.submissionsCloseAt || nextHourIST())}" aria-label="Auto turn off time (IST)">
+            <button class="btn sm" id="closeAtSet">${s.submissionsCloseAt ? 'Update' : 'Set timer'}</button>
+            ${s.submissionsCloseAt ? '<button class="btn ghost sm" id="closeAtClear">Clear</button>' : ''}
+          </div>
+        </div>
+      </div>
       <label class="card setting"><div><b>Sound on new submissions</b><div class="muted small">Plays a chime when a team sends something.</div></div><span class="switch"><input type="checkbox" id="setSound" ${store.get('mm_sound') !== '0' ? 'checked' : ''}><span></span></span></label>
       ${driveCard(d)}
       <div class="card setting"><div><b>Export</b><div class="muted small">All submissions and review decisions as CSV.</div></div><button class="btn sm" id="exportBtn">Download CSV</button></div>
@@ -895,7 +922,27 @@ async function viewSettings() {
     </div>`);
   const save = body => api('/api/admin/settings', { method: 'POST', body: JSON.stringify(body) }).then(() => toast('Saved'));
   $('#setBoard').onchange = e => save({ showLeaderboard: e.target.checked });
-  $('#setOpen').onchange = e => save({ submissionsOpen: e.target.checked });
+  // Switch on = submissions stopped (default off = teams can send).
+  $('#setOpen').onchange = e => save({ submissionsOpen: !e.target.checked }).then(() => viewSettings());
+  $('#closeAtSet').onclick = async () => {
+    const at = fromISTInput($('#closeAt').value);
+    if (!at) return toast('Pick a date and time', '', 'rejected');
+    if (at <= Date.now()) return toast('Pick a time in the future', '', 'rejected');
+    try {
+      await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ submissionsCloseAt: at, ...(s.submissionsOpen ? {} : { submissionsOpen: true }) }) });
+      toast('Timer set', `Submissions turn off at ${istTime(at)} IST.`); viewSettings();
+    } catch (err) { toast('Error', err.message, 'rejected'); }
+  };
+  $('#closeAtClear') && ($('#closeAtClear').onclick = async () => {
+    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ submissionsCloseAt: null }) });
+    toast('Timer cleared'); viewSettings();
+  });
+  clearInterval(settingsTick);
+  if (s.submissionsCloseAt) settingsTick = setInterval(() => {
+    if (route.name !== 'settings') return clearInterval(settingsTick);
+    $$('[data-left]').forEach(el => { el.textContent = leftText(+el.dataset.left); });
+    if (Date.now() > s.submissionsCloseAt + 6000) { clearInterval(settingsTick); viewSettings(); } // show that it switched off
+  }, 1000);
   $('#setSound').onchange = e => store.set('mm_sound', e.target.checked ? '1' : '0');
   $('#logoutBtn').onclick = logout;
   $('#driveConnect') && ($('#driveConnect').onclick = async () => {
