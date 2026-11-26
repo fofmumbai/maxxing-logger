@@ -9,7 +9,7 @@ const store = {
 };
 const STATUS = { todo: 'Not started', pending: 'Needs review', approved: 'Approved', rejected: 'Rejected' };
 const AV = ['var(--lime)', 'var(--coral)', 'var(--green)', '#C9C8FF'];
-const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>';
+const ICON_TRASH = icon('trash');
 
 let token = store.get('mm_admin');
 let me = null; // { super, id, name, username, teamIds }
@@ -49,7 +49,15 @@ function ago(ts) {
   return new Date(ts * 1000).toLocaleString();
 }
 const fmtSize = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
-const avatar = (name, i) => `<span class="av" style="background:${AV[i % 4]}">${esc((name || '?')[0].toUpperCase())}</span>`;
+// A member's onboarding selfie, or their initial on a colour until they've taken one.
+const avatar = (m, i) => m.selfie
+  ? `<img class="av" src="${esc(m.selfie)}" alt="" loading="lazy">`
+  : `<span class="av" style="background:${AV[i % 4]}">${esc((m.name || '?')[0].toUpperCase())}</span>`;
+// Same, but tapping the photo opens it in the lightbox with when and where it was taken.
+const selfieAvatar = (m, i) => m.selfie
+  ? `<button type="button" class="av-btn" data-view="${esc(m.selfie)}" data-kind="image" title="${esc(m.name)}'s onboarding photo"
+      data-cap="${esc(JSON.stringify({ t: m.selfieAt || null, u: m.selfieUploadedAt || null, lat: m.selfieLat, lng: m.selfieLng, acc: m.selfieAccuracy }))}">${avatar(m, i)}</button>`
+  : avatar(m, i);
 
 // Render into #view while keeping the comment box the organiser is typing in.
 function paint(html) {
@@ -87,13 +95,13 @@ function parseRoute() {
   const allowed = isSuper() ? ['teams', 'queue', 'board', 'tasks', 'admins', 'settings'] : ['teams', 'queue', 'board', 'settings'];
   return { name: allowed.includes(name) ? name : 'teams' };
 }
-window.addEventListener('hashchange', () => { route = parseRoute(); window.scrollTo(0, 0); render(); });
+window.addEventListener('hashchange', () => { if (!token) return; route = parseRoute(); window.scrollTo(0, 0); render(); });
 function render() {
   const tab = route.name === 'team' ? 'teams' : route.name;
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   ({ teams: viewTeams, team: () => viewTeam(route.id), queue: viewQueue, board: viewBoard, tasks: viewTasks, admins: viewAdmins, settings: viewSettings })[route.name]()
     .catch(err => err.message !== 'Logged out' && paint(`<div class="empty">${esc(err.message)}</div>`));
-  loadSummary();
+  loadSummary().catch(() => {}); // the badge is best-effort; a 401 already logs out inside api()
 }
 
 async function loadSummary() {
@@ -135,18 +143,18 @@ function captureLine(s) {
   const located = s.media.filter(m => m.lat != null);
   const first = located[0];
   const taken = s.media.find(m => m.capturedAt)?.capturedAt;
-  if (!first) return `<div class="cap none">📍 No location shared${taken ? ` · taken ${fmtTime(taken)} IST` : ''}</div>`;
+  if (!first) return `<div class="cap none">${icon('pin')}No location shared${taken ? ` · taken ${fmtTime(taken)} IST` : ''}</div>`;
   const partial = located.length < s.media.length ? ` · ${located.length}/${s.media.length} files located` : '';
-  return `<div class="cap">📍 <a href="${mapsUrl(first)}" target="_blank" rel="noopener">${coords(first)}</a> <span class="muted">±${Math.round(first.accuracy || 0)} m${taken ? ` · taken ${fmtTime(taken)} IST` : ''}${partial}</span></div>`;
+  return `<div class="cap">${icon('pin')}<a href="${mapsUrl(first)}" target="_blank" rel="noopener">${coords(first)}</a> <span class="muted">±${Math.round(first.accuracy || 0)} m${taken ? ` · taken ${fmtTime(taken)} IST` : ''}${partial}</span></div>`;
 }
 
 function mediaTile(m) {
   const cap = JSON.stringify({ t: m.capturedAt || null, u: m.uploadedAt || null, lat: m.lat, lng: m.lng, acc: m.accuracy, g: m.source === 'gallery' });
   return `<div class="m" data-view="${esc(m.url)}" data-kind="${m.kind}" data-drive="${esc(m.driveUrl || '')}" data-cap="${esc(cap)}" title="${fmtSize(m.size)}">
-    ${m.lat != null ? '<span class="pin" title="Has location">📍</span>' : ''}
-    ${m.source === 'gallery' ? '<span class="src-gal" title="Picked from the phone gallery, not captured live">🖼️ Gallery</span>' : ''}
+    ${m.lat != null ? `<span class="pin" title="Has location">${icon('pin')}</span>` : ''}
+    ${m.source === 'gallery' ? `<span class="src-gal" title="Picked from the phone gallery, not captured live">${icon('image')}Gallery</span>` : ''}
     ${isSuper() ? `<button class="del-file" data-del-file="${m.id}" aria-label="Delete this ${m.kind === 'video' ? 'video' : 'photo'}" title="Delete this file">${ICON_TRASH}</button>` : ''}
-    ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">▶ ${fmtSize(m.size)}</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
+    ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">${icon('play')}${fmtSize(m.size)}</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
   </div>`;
 }
 function subCard(s, { showTeam = false, showTask = false, attempt = null } = {}) {
@@ -155,7 +163,7 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
     <article class="card sub" id="sub-${s.id}">
       <div class="hd">
         <div>
-          ${showTeam ? `<a class="team" href="#/team/${s.team_id}">${esc(s.team_name)} →</a>` : ''}
+          ${showTeam ? `<a class="team" href="#/team/${s.team_id}">${esc(s.team_name)}${icon('chevron-right')}</a>` : ''}
           ${showTask ? `<h3>${esc(s.task_title)}</h3>` : ''}
           ${attempt ? `<b>Attempt ${attempt}</b>` : ''}
           <div class="muted small">by ${esc(s.member_name || 'removed member')} · ${ago(s.created_at)} · ${s.media.length} file${s.media.length === 1 ? '' : 's'}</div>
@@ -164,7 +172,7 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
       </div>
       <div class="media">${s.media.map(mediaTile).join('')}</div>
       ${captureLine(s)}
-      ${s.link ? `<a class="sub-link" href="${esc(s.link)}" target="_blank" rel="noopener">🔗 ${esc(s.link.replace(/^https?:\/\//, '').slice(0, 70))}</a>` : ''}
+      ${s.link ? `<a class="sub-link" href="${esc(s.link)}" target="_blank" rel="noopener">${icon('link')}${esc(s.link.replace(/^https?:\/\//, '').slice(0, 70))}</a>` : ''}
       ${s.note ? `<div class="note"><b>Team note:</b> ${esc(s.note)}</div>` : ''}
       ${!pending ? `<div class="reviewed ${s.status}"><b>${s.status === 'approved' ? 'Approved' : 'Rejected'}</b> ${ago(s.reviewed_at)}${s.reviewed_by ? ` by ${esc(s.reviewed_by)}` : ''}${s.comment ? ` · “${esc(s.comment)}”` : ''}</div>` : ''}
       <div class="rv ${pending || drafts[s.id] !== undefined ? '' : 'hidden'}" style="display:grid; gap:8px">
@@ -176,7 +184,7 @@ function subCard(s, { showTeam = false, showTask = false, attempt = null } = {})
       </div>
       <div class="sub-foot">
         ${!pending && drafts[s.id] === undefined ? `<button class="btn ghost sm" data-change="${s.id}">Change decision</button>` : '<span></span>'}
-        ${isSuper() ? `<button class="del-btn" data-del-sub="${s.id}" data-files="${s.media.length}" data-status="${s.status}" data-pts="${s.points ?? ''}">Delete submission</button>` : ''}
+        ${isSuper() ? `<button class="btn sm danger-ghost" data-del-sub="${s.id}" data-files="${s.media.length}" data-status="${s.status}" data-pts="${s.points ?? ''}">${ICON_TRASH}Delete submission</button>` : ''}
       </div>
     </article>`;
 }
@@ -234,7 +242,7 @@ async function viewTeams() {
           ${isSuper() ? `<div class="reviewers-line" style="margin-top:4px">${t.reviewers.length ? 'Reviewer: ' + esc(t.reviewers.join(', ')) : 'No reviewer assigned'}</div>` : ''}
         </div>
         <div class="foot">
-          <div class="avs">${t.members.map((m, i) => avatar(m.name, i)).join('')}${Array.from({ length: Math.max(0, d.maxMembers - t.members.length) }, () => '<span class="av av-empty">+</span>').join('')}</div>
+          <div class="avs">${t.members.map((m, i) => avatar(m, i)).join('')}${Array.from({ length: Math.max(0, d.maxMembers - t.members.length) }, () => '<span class="av av-empty">+</span>').join('')}</div>
           <span class="foot-r"><span class="muted small">${t.members.length}/${d.maxMembers} joined</span>
             ${isSuper() ? `<button class="card-del" data-del-team="${t.id}" aria-label="Delete ${esc(t.name)}" title="Delete team">${ICON_TRASH}</button>` : ''}</span>
         </div>
@@ -272,7 +280,7 @@ async function viewTeam(id) {
   const visible = rows.filter(r => teamTaskFilter === 'all' || r.status === teamTaskFilter);
 
   paint(`
-    <a class="back" href="#/teams">← All teams</a>
+    <a class="back" href="#/teams">${icon('arrow-left')}All teams</a>
     <section class="card thead">
       <div style="display:grid; gap:14px">
         <input class="namefield" id="teamName" value="${esc(team.name)}" maxlength="40" aria-label="Team name" ${isSuper() ? '' : 'readonly'}>
@@ -280,11 +288,11 @@ async function viewTeam(id) {
           <span class="muted small">ROOM CODE</span><b>${esc(team.code)}</b>
           ${isSuper() ? `<button class="btn ghost sm" id="copyLink">Copy join link</button>
           <button class="btn ghost sm" id="newCode">New code</button>
-          <button class="btn sm danger-ghost" id="deleteTeam">${ICON_TRASH} Delete team</button>` : ''}
+          <button class="btn sm danger-ghost" id="deleteTeam">${ICON_TRASH}Delete team</button>` : ''}
         </div>
         <div>
           <div class="muted small" style="margin-bottom:6px">MEMBERS · ${members.length}/${maxMembers}</div>
-          ${members.map((m, i) => `<span class="mchip">${avatar(m.name, i)}${esc(m.name)}${isSuper() ? `<button class="kick" data-kick="${m.id}" data-name="${esc(m.name)}" data-subs="${submissions.filter(x => x.member_id === m.id).length}">Remove</button>` : ''}</span>`).join('') || '<span class="muted">No one has joined yet.</span>'}
+          ${members.map((m, i) => `<span class="mchip">${selfieAvatar(m, i)}${esc(m.name)}${m.selfie ? '' : '<span class="no-selfie" title="Hasn\'t finished onboarding yet">No photo yet</span>'}${isSuper() ? `<button class="kick" data-kick="${m.id}" data-name="${esc(m.name)}" data-subs="${submissions.filter(x => x.member_id === m.id).length}">Remove</button>` : ''}</span>`).join('') || '<span class="muted">No one has joined yet.</span>'}
         </div>
       </div>
       <div class="scorebox">
@@ -315,7 +323,7 @@ async function viewTeam(id) {
           <span class="num">#${i + 1}</span>
           <span class="tt"><b>${esc(t.title)}</b><span class="muted small">${subs.length ? `${subs.length} submission${subs.length > 1 ? 's' : ''} · last ${ago(subs[0].created_at)}` : 'No submissions yet'}</span></span>
           <span style="display:flex; gap:6px; align-items:center"><span class="pill st-${status}">${STATUS[status]}</span><span class="pill pts">+${t.points}</span></span>
-          <span class="chev">›</span>
+          <span class="chev">${icon('chevron-right')}</span>
         </button>
         ${open ? `<div class="body">
           ${t.description ? `<div class="muted small">${esc(t.description)}</div>` : ''}
@@ -390,25 +398,27 @@ async function viewBoard() {
   const rows = await api('/api/admin/leaderboard');
   paint(`<div class="toolbar"><h2>Leaderboard</h2></div>
     <div class="card">${rows.map((r, i) => `
-      <a class="lbrow" ${isSuper() || me.teamIds.includes(r.id) ? `href="#/team/${r.id}"` : ''} style="${i ? 'border-top:1px solid var(--line)' : ''}"><span class="rank">${i + 1}</span><span class="name">${esc(r.name)}</span>
-      ${isSuper() ? `<span class="muted small">${r.approved} approved · ${r.pending} to review</span>` : ''}<span class="pill pts" style="font-size:16px">${r.points}</span></a>`).join('')}</div>`);
+      <a class="lbrow" ${isSuper() || me.teamIds.includes(r.id) ? `href="#/team/${r.id}"` : ''} style="${i ? 'border-top:1px solid var(--line)' : ''}"><span class="rank">${i + 1}</span><span class="name">${esc(r.name)}${isSuper() ? `<span class="lbstat">${r.approved} approved · ${r.pending} to review</span>` : ''}</span><span class="pill pts" style="font-size:16px">${r.points}</span></a>`).join('')}</div>`);
 }
 
 // ---------- Tasks editor ----------
 // Requirement summary used in the task list, editor preview and submission cards.
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function reqParts(t) {
-  if (!t.min_photos && !t.min_videos && !t.needs_link) return [{ ic: '📝', text: 'Nothing to upload', cls: 'any' }];
+  if (!t.min_photos && !t.min_videos && !t.needs_link) return [{ ic: 'note', text: 'Nothing to upload', cls: 'any' }];
   return [
-    t.min_photos ? { ic: '📷', text: plural(t.min_photos, 'photo') } : null,
-    t.min_videos ? { ic: '🎥', text: plural(t.min_videos, 'video') } : null,
-    t.needs_link ? { ic: '🔗', text: t.link_label || 'Link' } : null,
+    t.min_photos ? { ic: 'camera', text: plural(t.min_photos, 'photo') } : null,
+    t.min_videos ? { ic: 'video', text: plural(t.min_videos, 'video') } : null,
+    t.needs_link ? { ic: 'link', text: t.link_label || 'Link' } : null,
   ].filter(Boolean);
 }
 // Gallery uploads only matter when the task asks for photos/videos.
 const wantsMedia = t => !!(t.min_photos || t.min_videos);
-const galleryPill = t => t.allow_gallery && wantsMedia(t) ? '<span class="req-pill gallery">🖼️ Gallery allowed</span>' : '';
-const reqPills = t => reqParts(t).map(p => `<span class="req-pill ${p.cls || ''}">${p.ic} ${esc(p.text)}</span>`).join('') + galleryPill(t);
+const galleryPill = t => t.allow_gallery && wantsMedia(t) ? `<span class="req-pill gallery">${icon('image')}Gallery allowed</span>` : '';
+// The short requirement line players see under each task title (mirrors reqChips in app.js).
+const playerChips = t => [t.min_photos ? `<span>${icon('camera')}${t.min_photos}</span>` : '', t.min_videos ? `<span>${icon('video')}${t.min_videos}</span>` : '', t.needs_link ? `<span>${icon('link')}</span>` : '',
+  t.allow_gallery && (t.min_photos || t.min_videos) ? `<span>${icon('image')}</span>` : ''].filter(Boolean).join('');
+const reqPills = t => reqParts(t).map(p => `<span class="req-pill ${p.cls || ''}">${icon(p.ic)}${esc(p.text)}</span>`).join('') + galleryPill(t);
 
 // ---------- Task schedule (entered and shown in IST, stored as ms since epoch) ----------
 const IST_OFFSET_MS = 330 * 60 * 1000;
@@ -419,7 +429,7 @@ const istDay = ms => new Date(ms).toLocaleDateString('en-IN', { timeZone: 'Asia/
 function schedText(t) {
   const o = t.opens_at, c = t.closes_at;
   if (!o && !c) return '';
-  if (o && c) return istDay(o) === istDay(c) ? `${istDay(o)}, ${istTime(o)} – ${istTime(c)} IST` : `${istDay(o)} ${istTime(o)} → ${istDay(c)} ${istTime(c)} IST`;
+  if (o && c) return istDay(o) === istDay(c) ? `${istDay(o)}, ${istTime(o)} – ${istTime(c)} IST` : `${istDay(o)} ${istTime(o)} – ${istDay(c)} ${istTime(c)} IST`;
   return o ? `Opens ${istDay(o)}, ${istTime(o)} IST` : `Closes ${istDay(c)}, ${istTime(c)} IST`;
 }
 function schedPill(t) {
@@ -427,7 +437,7 @@ function schedPill(t) {
   if (!txt) return '';
   const n = Date.now();
   const st = t.opens_at && n < t.opens_at ? ['upcoming', 'Upcoming'] : t.closes_at && n >= t.closes_at ? ['closed', 'Closed'] : ['open', 'Open now'];
-  return `<span class="req-pill sched-${st[0]}">🕒 ${esc(txt)} · <b>${st[1]}</b></span>`;
+  return `<span class="req-pill sched-${st[0]}">${icon('clock')}${esc(txt)} · <b>${st[1]}</b></span>`;
 }
 
 async function viewTasks() {
@@ -447,15 +457,15 @@ async function viewTasks() {
           <div class="treq">${reqPills(t)}${schedPill(t)}</div>
         </div>
         <div class="tacts">
-          <button class="icon-btn" data-move="${t.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up">↑</button>
-          <button class="icon-btn" data-move="${t.id}" data-dir="1" ${i === tasks.length - 1 ? 'disabled' : ''} aria-label="Move down" title="Move down">↓</button>
+          <button class="icon-btn" data-move="${t.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up">${icon('arrow-up')}</button>
+          <button class="icon-btn" data-move="${t.id}" data-dir="1" ${i === tasks.length - 1 ? 'disabled' : ''} aria-label="Move down" title="Move down">${icon('arrow-down')}</button>
           <button class="btn ghost sm" data-edit="${t.id}">Edit</button>
-          <button class="del-btn" data-del="${t.id}" aria-label="Delete task ${i + 1}">Delete</button>
+          <button class="btn sm danger-ghost" data-del="${t.id}" aria-label="Delete task ${i + 1}">${ICON_TRASH}Delete</button>
         </div>
       </div>`).join('') || '<div class="empty">No tasks yet. Add one with “+ New task”.</div>'}</div>`);
 
-  $('#newTaskBtn').onclick = () => editTask(null);
-  $$('[data-edit]').forEach(b => b.onclick = () => editTask(tasks.find(t => t.id === +b.dataset.edit)));
+  $('#newTaskBtn').onclick = () => editTask(null, tasks.length + 1);
+  $$('[data-edit]').forEach(b => b.onclick = () => { const i = tasks.findIndex(t => t.id === +b.dataset.edit); editTask(tasks[i], i + 1); });
   $$('[data-move]').forEach(b => b.onclick = async () => {
     try { await api(`/api/admin/tasks/${b.dataset.move}/move`, { method: 'POST', body: JSON.stringify({ dir: +b.dataset.dir }) }); viewTasks(); }
     catch (err) { toast('Error', err.message, 'rejected'); }
@@ -475,27 +485,27 @@ async function viewTasks() {
 }
 
 // Task editor (create or edit) with submission requirements and a live player preview.
-function editTask(task) {
+function editTask(task, num = 1) {
   const t = task || { title: '', description: '', points: 10, min_photos: 1, min_videos: 0, needs_link: 0, link_label: '', allow_gallery: 0, opens_at: null, closes_at: null };
   const el = document.createElement('div');
   el.className = 'dlg-scrim';
   el.innerHTML = `
     <form class="dlg card tedit" autocomplete="off">
-      <div class="tedit-hd"><h3>${task ? 'Edit task' : 'New task'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+      <div class="tedit-hd"><h3>${task ? 'Edit task' : 'New task'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">${icon('x')}</button></div>
       <label class="fl">Title<input class="input" name="title" maxlength="120" required value="${esc(t.title)}" placeholder="e.g. Local train selfie"></label>
       <label class="fl">Description / rules<textarea class="input" name="description" maxlength="1000" rows="3" placeholder="What should players do?">${esc(t.description)}</textarea></label>
       <label class="fl pts-f">Points<input class="input" name="points" type="number" min="0" max="10000" value="${t.points}"></label>
       <fieldset class="reqset">
         <legend>What players must submit</legend>
-        <div class="stepper"><span>📷 Photos required</span><div><button type="button" data-step="min_photos" data-d="-1">−</button><input name="min_photos" type="number" min="0" max="12" value="${t.min_photos}"><button type="button" data-step="min_photos" data-d="1">+</button></div></div>
-        <div class="stepper"><span>🎥 Videos required</span><div><button type="button" data-step="min_videos" data-d="-1">−</button><input name="min_videos" type="number" min="0" max="5" value="${t.min_videos}"><button type="button" data-step="min_videos" data-d="1">+</button></div></div>
-        <label class="toggle-row"><span>🔗 Link required</span><span class="switch"><input type="checkbox" name="needs_link" ${t.needs_link ? 'checked' : ''}><span></span></span></label>
+        <div class="stepper"><span>${icon('camera')}Photos required</span><div><button type="button" data-step="min_photos" data-d="-1" aria-label="Fewer photos">${icon('minus')}</button><input name="min_photos" type="number" min="0" max="12" value="${t.min_photos}"><button type="button" data-step="min_photos" data-d="1" aria-label="More photos">${icon('plus')}</button></div></div>
+        <div class="stepper"><span>${icon('video')}Videos required</span><div><button type="button" data-step="min_videos" data-d="-1" aria-label="Fewer videos">${icon('minus')}</button><input name="min_videos" type="number" min="0" max="5" value="${t.min_videos}"><button type="button" data-step="min_videos" data-d="1" aria-label="More videos">${icon('plus')}</button></div></div>
+        <label class="toggle-row"><span>${icon('link')}Link required</span><span class="switch"><input type="checkbox" name="needs_link" ${t.needs_link ? 'checked' : ''}><span></span></span></label>
         <label class="fl link-label ${t.needs_link ? '' : 'hidden'}">Link label (shown to players)<input class="input" name="link_label" maxlength="60" value="${esc(t.link_label)}" placeholder="e.g. Instagram reel link"></label>
-        <label class="toggle-row gallery-row"><span>🖼️ Allow uploads from gallery</span><span class="switch"><input type="checkbox" name="allow_gallery" ${t.allow_gallery ? 'checked' : ''}><span></span></span></label>
+        <label class="toggle-row gallery-row"><span>${icon('image')}Allow uploads from gallery</span><span class="switch"><input type="checkbox" name="allow_gallery" ${t.allow_gallery ? 'checked' : ''}><span></span></span></label>
       </fieldset>
       <fieldset class="reqset">
         <legend>Schedule <span class="muted small">(optional, IST)</span></legend>
-        <label class="toggle-row"><span>🕒 Time window</span><span class="switch"><input type="checkbox" name="scheduled" ${t.opens_at || t.closes_at ? 'checked' : ''}><span></span></span></label>
+        <label class="toggle-row"><span>${icon('clock')}Time window</span><span class="switch"><input type="checkbox" name="scheduled" ${t.opens_at || t.closes_at ? 'checked' : ''}><span></span></span></label>
         <div class="sched-fields ${t.opens_at || t.closes_at ? '' : 'hidden'}">
           <label class="fl">Opens at (IST)<input class="input" type="datetime-local" name="opens" value="${toISTInput(t.opens_at)}"></label>
           <label class="fl">Closes at (IST)<input class="input" type="datetime-local" name="closes" value="${toISTInput(t.closes_at)}"></label>
@@ -520,7 +530,10 @@ function editTask(task) {
     f.querySelector('.sched-fields').classList.toggle('hidden', !f.scheduled.checked);
     const err = v.opens_at && v.closes_at && v.closes_at <= v.opens_at ? 'Closing time must be after the opening time.' : '';
     const errEl = f.querySelector('.sched-err'); errEl.textContent = err; errEl.classList.toggle('hidden', !err);
-    f.querySelector('#tprev').innerHTML = `<div class="ttop"><b>${esc(v.title || 'Untitled task')}</b><span class="pill pts">+${v.points}</span></div><div class="treq">${reqPills(v)}${schedPill(v)}</div>`;
+    // Same layout as the task row in the player app.
+    f.querySelector('#tprev').innerHTML = `<div class="pv-task"><span class="pv-ic"></span>
+      <div><b>${esc(v.title || 'Untitled task')}</b><div class="pv-sub">#${num}<span class="pv-chips req-chips">${playerChips(v)}</span></div>${schedPill(v) ? `<div class="pv-sched">${schedPill(v)}</div>` : ''}</div>
+      <span class="pill pts">+${v.points}</span></div>`;
   };
   f.oninput = preview;
   // Turning the schedule on pre-fills a sensible window: the next full hour, for one hour.
@@ -588,7 +601,7 @@ async function viewAdmins() {
         </div>
         <div class="tacts">
           <button class="btn ghost sm" data-edit-admin="${a.id}">Edit</button>
-          <button class="del-btn" data-del-admin="${a.id}">Delete</button>
+          <button class="btn sm danger-ghost" data-del-admin="${a.id}">${ICON_TRASH}Delete</button>
         </div>
       </div>`).join('') || '<div class="empty">No admins yet. Add one with “+ New admin” and assign their teams.</div>'}</div>`);
   $('#newAdminBtn').onclick = () => editAdmin(null, admins, teams);
@@ -616,7 +629,7 @@ function editAdmin(admin, admins, teams) {
   el.className = 'dlg-scrim';
   el.innerHTML = `
     <form class="dlg card tedit" autocomplete="off">
-      <div class="tedit-hd"><h3>${admin ? 'Edit admin' : 'New admin'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+      <div class="tedit-hd"><h3>${admin ? 'Edit admin' : 'New admin'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">${icon('x')}</button></div>
       <label class="fl">Name<input class="input" name="name" maxlength="60" required value="${esc(a.name)}" placeholder="e.g. Priya"></label>
       <label class="fl">Username<input class="input" name="username" maxlength="40" required value="${esc(a.username)}" placeholder="e.g. priya" autocapitalize="none" spellcheck="false"></label>
       <label class="fl">${admin ? 'New password <span class="muted small">(leave empty to keep the current one)</span>' : 'Password'}
@@ -778,11 +791,11 @@ document.addEventListener('click', async e => {
     let cap = {};
     try { cap = JSON.parse(v.dataset.cap || '{}'); } catch {}
     const info = [
-      cap.g ? '<span>🖼️ Uploaded from the phone gallery (not captured live)</span>' : '',
-      cap.t ? `<span>🕒 ${cap.g ? 'File date' : 'Taken'} ${fmtDateTime(cap.t)}</span>` : '<span>🕒 Capture time unknown</span>',
+      cap.g ? `<span>${icon('image')}Uploaded from the phone gallery (not captured live)</span>` : '',
+      cap.t ? `<span>${icon('clock')}${cap.g ? 'File date' : 'Taken'} ${fmtDateTime(cap.t)}</span>` : `<span>${icon('clock')}Capture time unknown</span>`,
       cap.lat != null
-        ? `<span>📍 ${coords(cap)} · ±${Math.round(cap.acc || 0)} m · <a href="${mapsUrl(cap)}" target="_blank" rel="noopener">Open in Google Maps</a></span>`
-        : '<span>📍 No location shared</span>',
+        ? `<span>${icon('pin')}${coords(cap)} · ±${Math.round(cap.acc || 0)} m · <a href="${mapsUrl(cap)}" target="_blank" rel="noopener">Open in Google Maps</a></span>`
+        : `<span>${icon('pin')}No location shared</span>`,
       cap.u ? `<span class="muted">Uploaded ${fmtDateTime(cap.u)}</span>` : '',
     ].join('');
     lb.innerHTML = `<div class="lb-cap">${info}</div>` + (v.dataset.kind === 'video' ? `<video src="${esc(v.dataset.view)}" controls autoplay playsinline></video>` : `<img src="${esc(v.dataset.view)}" alt="">`)
@@ -809,7 +822,7 @@ document.addEventListener('click', async e => {
     try {
       await api(`/api/admin/submissions/${id}/review`, { method: 'POST', body: JSON.stringify({ status, comment }) });
       delete drafts[id];
-      toast(status === 'approved' ? 'Approved ✓' : 'Rejected', 'The team has been notified.', status);
+      toast(status === 'approved' ? 'Approved' : 'Rejected', 'The team has been notified.', status);
       render();
     } catch (err) { toast('Error', err.message, 'rejected'); rb.disabled = false; }
   }
@@ -832,9 +845,9 @@ function chime() {
 }
 // Re-render only views affected by an event; never the tasks editor or settings (would drop unsaved edits).
 function liveRefresh(teamId) {
-  if (route.name === 'team') { if (route.id === teamId) render(); else loadSummary(); }
+  if (route.name === 'team') { if (route.id === teamId) render(); else loadSummary().catch(() => {}); }
   else if (['teams', 'queue', 'board'].includes(route.name)) render();
-  else loadSummary();
+  else loadSummary().catch(() => {});
 }
 function connect() {
   es?.close();
@@ -868,7 +881,7 @@ const driveResult = new URLSearchParams(location.search).get('drive');
 if (driveResult) {
   history.replaceState(null, '', '/admin' + location.hash);
   setTimeout(() => driveResult === 'connected'
-    ? toast('Google Drive connected ✓', 'New submissions will be saved to your Drive.', 'approved')
+    ? toast('Google Drive connected', 'New submissions will be saved to your Drive.', 'approved')
     : toast('Google Drive not connected', driveResult.replace(/^error:/, ''), 'rejected'), 300);
 }
 

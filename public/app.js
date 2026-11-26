@@ -16,7 +16,9 @@ const STATUS_ICON = {
   approved: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   rejected: svg('<path d="M12 7v6M12 17h.01"/>'),
 };
-const ICON_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+const ICON_X = icon('x');
+// Static markup marks icon spots with data-icon; swap in the SVGs once.
+document.querySelectorAll('[data-icon]').forEach(e => { e.outerHTML = icon(e.dataset.icon); });
 
 // Styled confirmation popup (resolves true/false).
 function confirmBox(title, body, okLabel, danger = false) {
@@ -138,7 +140,7 @@ function render() {
   if (taskSort === 'points') list.sort((a, b) => b.t.points - a.t.points || tasks.indexOf(a.t) - tasks.indexOf(b.t));
   $('#taskList').innerHTML = list.length ? list.map(({ t, status }) => `
     <button class="task card ${status} ${(status === 'todo' || status === 'rejected') && ['upcoming', 'closed'].includes(taskWindow(t).state) ? 'w-' + taskWindow(t).state : ''}" data-task="${t.id}" aria-label="${esc(t.title)}, ${STATUS_LABEL[status]}, ${t.points} points">
-      <span class="ic ${status}">${(status === 'todo' || status === 'rejected') && taskWindow(t).state === 'upcoming' ? '🔒' : STATUS_ICON[status]}</span>
+      <span class="ic ${status}">${(status === 'todo' || status === 'rejected') && taskWindow(t).state === 'upcoming' ? icon('lock') : STATUS_ICON[status]}</span>
       <div>
         <h3>${esc(t.title)}</h3>
         <div class="sub ${status}">#${tasks.indexOf(t) + 1}${status === 'todo' ? '' : ' · ' + STATUS_LABEL[status]}<span class="req-chips">${reqChips(t)}</span></div>
@@ -168,14 +170,14 @@ function renderTeam() {
   $('#teamView').innerHTML = `
     <div class="card codebox"><span class="small" style="opacity:.7">ROOM CODE</span><b>${esc(team.code)}</b><span class="small" style="opacity:.7">${members.length}/${maxMembers} members joined</span></div>
     <div class="card">${members.map((m, i) => `
-      <div class="member"><div class="avatar" style="background:${AVATAR_COLORS[i % 4]}">${esc(m.name[0].toUpperCase())}</div>
+      <div class="member">${m.selfie ? `<img class="avatar" src="${esc(m.selfie)}" alt="">` : `<div class="avatar" style="background:${AVATAR_COLORS[i % 4]}">${esc(m.name[0].toUpperCase())}</div>`}
       <div style="flex:1"><b>${esc(m.name)}</b>${m.id === me.id ? ' <span class="muted small">(you)</span>' : ''}</div></div>`).join('')}
     </div>
     <div class="card" style="padding:16px; display:grid; gap:4px">
       <b>${team.points} points · ${team.approved}/${state.tasks.length} tasks approved</b>
       <span class="muted small">${team.pending} waiting for review</span>
     </div>
-    <button class="card perm-link" id="permLink"><span>📷 📍 🔔</span><b>Phone permissions</b><span class="muted small">Camera, location, alerts →</span></button>
+    <button class="card perm-link" id="permLink"><span class="perm-ics">${icon('camera')}${icon('pin')}${icon('bell')}</span><b>Phone permissions</b><span class="muted small perm-go">Camera, location, alerts${icon('chevron-right')}</span></button>
     <button class="linkbtn" id="leaveBtn">Sign out on this device</button>`;
   $('#permLink').onclick = openPerms;
   $('#leaveBtn').onclick = async () => { if (await confirmBox('Sign out on this device?', 'You can rejoin any time with the same room code and <b>the same name</b>.', 'Sign out')) logout(); };
@@ -279,7 +281,7 @@ function uploadItem(d) {
 }
 
 function overlayHtml(d) {
-  if (d.state === 'done') return `<span class="ok" aria-label="Uploaded">✓</span>`;
+  if (d.state === 'done') return `<span class="ok" aria-label="Uploaded">${icon('check')}</span>`;
   if (d.state === 'error') return `<button class="up err" data-retry="${d.key}"><b>!</b><span>Tap to retry</span></button>`;
   const pct = Math.round((d.progress || 0) * 100);
   return `<div class="up"><b>${d.state === 'queued' ? 'Waiting…' : pct >= 100 ? 'Saving…' : pct + '%'}</b><span class="upline"><i style="width:${pct}%"></i></span></div>`;
@@ -303,7 +305,7 @@ function updateSendBtn() {
   if (!rq.ok && !sending) { btn.innerHTML = `<span style="display:grid; gap:4px; justify-items:center">Send for review<span class="small" style="font-weight:400">Still needed: ${esc(rq.missing.join(' · '))}</span></span>`; return; }
   if (!n) { btn.innerHTML = 'Send for review'; return; }
   const label = sending ? (done < n ? `Finishing uploads… ${pct}%` : 'Submitting…') : `Send ${n} item${n > 1 ? 's' : ''} for review`;
-  const sub = failed ? `${failed} failed, tap to retry` : done < n ? `Uploading ${done}/${n} · ${pct}%` : `All ${n} uploaded ✓`;
+  const sub = failed ? `${failed} failed, tap to retry` : done < n ? `Uploading ${done}/${n} · ${pct}%` : `All ${n} uploaded`;
   btn.innerHTML = `<span style="display:grid; gap:6px; width:100%; justify-items:center">${label}<span class="small" style="font-weight:400">${sub}</span>${done < n ? `<span class="upbar"><i style="width:${pct}%"></i></span>` : ''}</span>`;
 }
 
@@ -342,8 +344,8 @@ const cd = (at, style = 'short') => `<span data-cd="${at}" data-cd-style="${styl
 function schedLine(t, status) {
   if (status === 'approved' || status === 'pending') return '';
   const w = taskWindow(t);
-  if (w.state === 'upcoming') return `<div class="sched up">🔒 Opens ${whenIST(w.at)} · in ${cd(w.at)}</div>`;
-  if (w.state === 'open') return `<div class="sched open ${w.soon ? 'soon' : ''}">⏳ ${cd(w.at)} left · closes ${fmtClock(w.at)} IST</div>`;
+  if (w.state === 'upcoming') return `<div class="sched up">${icon('lock')} Opens ${whenIST(w.at)} · in ${cd(w.at)}</div>`;
+  if (w.state === 'open') return `<div class="sched open ${w.soon ? 'soon' : ''}">${icon('timer')} ${cd(w.at)} left · closes ${fmtClock(w.at)} IST</div>`;
   if (w.state === 'closed') return `<div class="sched closed">Closed at ${whenIST(w.at)}</div>`;
   return '';
 }
@@ -360,7 +362,8 @@ setInterval(() => {
 // ---------- Task requirements ----------
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function reqChips(t) {
-  return [t.min_photos ? `📷 ${t.min_photos}` : '', t.min_videos ? `🎥 ${t.min_videos}` : '', t.needs_link ? '🔗' : ''].filter(Boolean).join(' · ');
+  return [t.min_photos ? `<span>${icon('camera')}${t.min_photos}</span>` : '', t.min_videos ? `<span>${icon('video')}${t.min_videos}</span>` : '', t.needs_link ? `<span>${icon('link')}</span>` : '',
+    t.allow_gallery && (t.min_photos || t.min_videos) ? `<span title="Gallery uploads allowed">${icon('image')}</span>` : ''].filter(Boolean).join('');
 }
 function validLink(v) {
   const s = String(v || '').trim();
@@ -387,9 +390,9 @@ function reqListHtml(t) {
 // One dashed slot per required photo/video. Filled slots show the capture; tap an empty one to add.
 function draftThumb(d) {
   return `<div class="thumb" data-key="${d.key}">${d.kind === 'video' ? `<video src="${d.url}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${d.url}" alt="">`}
-    <span class="tag">${d.source === 'gallery' ? '🖼️ ' : ''}${d.meta?.lat != null ? '📍 ' : ''}${d.kind === 'video' ? `▶ ${fmtDur(d.duration || 0)} · ` : ''}${fmtMB(d.file.size)}</span>
+    <span class="tag">${d.source === 'gallery' ? icon('image') : ''}${d.meta?.lat != null ? icon('pin') : ''}${d.kind === 'video' ? `${icon('play')}${fmtDur(d.duration || 0)} · ` : ''}${fmtMB(d.file.size)}</span>
     <div class="ov">${overlayHtml(d)}</div>
-    <button class="x" data-rm="${d.key}" aria-label="Remove">×</button></div>`;
+    <button class="x" data-rm="${d.key}" aria-label="Remove">${icon('x')}</button></div>`;
 }
 function slotGroupHtml(kind, need) {
   const items = draft.filter(d => d.kind === (kind === 'photo' ? 'image' : 'video'));
@@ -399,7 +402,7 @@ function slotGroupHtml(kind, need) {
     `<button class="slot" data-slot="${kind}">${kind === 'photo' ? ICON_CAM : ICON_VID}<span>${noun} ${items.length + i + 1}</span></button>`).join('');
   const extra = done && draft.length < MAX_ITEMS ? `<button class="slot extra" data-slot="${kind}"><b>+</b><span>Add more</span></button>` : '';
   return `<div class="slot-sec">
-    <div class="slot-h"><span>${noun}s</span><span class="slot-n ${done ? 'ok' : ''}">${done ? '✓ ' : ''}${Math.min(items.length, need)}/${need}</span></div>
+    <div class="slot-h"><span>${noun}s</span><span class="slot-n ${done ? 'ok' : ''}">${done ? icon('check') : ''}${Math.min(items.length, need)}/${need}</span></div>
     <div class="thumbs">${items.map(draftThumb).join('')}${empty}${extra}</div></div>`;
 }
 function slotsHtml(t) {
@@ -434,18 +437,16 @@ function refreshReq() {
 
 function linkHtml(sub) {
   if (!sub?.link) return '';
-  return `<a class="sub-link" href="${esc(sub.link)}" target="_blank" rel="noopener">🔗 ${esc(sub.link.replace(/^https?:\/\//, '').slice(0, 60))}</a>`;
+  return `<a class="sub-link" href="${esc(sub.link)}" target="_blank" rel="noopener">${icon('link')}${esc(sub.link.replace(/^https?:\/\//, '').slice(0, 60))}</a>`;
 }
 function mediaHtml(list) {
-  return `<div class="thumbs">${list.map(m => `
+  return `<div class="thumbs fixed">${list.map(m => `
     <div class="thumb" data-view="${esc(m.url)}" data-kind="${m.kind}">
-      ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">▶ Video</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
+      ${m.kind === 'video' ? `<video src="${esc(m.url)}#t=0.1" muted playsinline preload="metadata"></video><span class="tag">${icon('play')}Video</span>` : `<img src="${esc(m.url)}" loading="lazy" alt="">`}
     </div>`).join('')}</div>`;
 }
 
-const ICON_CAM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>';
-const ICON_GAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>';
-const ICON_VID = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>';
+const ICON_CAM = icon('camera'), ICON_GAL = icon('image'), ICON_VID = icon('video');
 
 function renderSheet() {
   const t = state.tasks.find(x => x.id === openTaskId);
@@ -457,7 +458,7 @@ function renderSheet() {
 
   let body = '';
   if (status === 'approved') {
-    body = `<div class="feedback approved"><b>+${t.points} points earned 🎉</b>${sub.comment ? `<span>Organisers: “${esc(sub.comment)}”</span>` : ''}</div>${linkHtml(sub)}${mediaHtml(sub.media)}`;
+    body = `<div class="feedback approved"><b>${icon('sparkle')}+${t.points} points earned</b>${sub.comment ? `<span>Organisers: “${esc(sub.comment)}”</span>` : ''}</div>${linkHtml(sub)}${mediaHtml(sub.media)}`;
   } else if (status === 'pending') {
     body = `<div class="feedback pending"><b>Waiting for review</b><span>Sent by ${esc(sub.member_name || 'your team')} ${ago(sub.created_at)}. You'll be notified when organisers review it.</span></div>${linkHtml(sub)}${mediaHtml(sub.media)}`;
   } else {
@@ -469,7 +470,7 @@ function renderSheet() {
       body += `<div class="sched-card closed"><b>Submissions closed</b><span class="small">This task closed at ${whenIST(win.at)}.</span></div>`;
     }
     if (canSubmit && win.state === 'open') {
-      body += `<div class="sched-bar ${win.soon ? 'soon' : ''}">⏳ <b>${cd(win.at, 'clock')}</b> left · closes ${whenIST(win.at)}</div>`;
+      body += `<div class="sched-bar ${win.soon ? 'soon' : ''}">${icon('timer')}<b>${cd(win.at, 'clock')}</b> left · closes ${whenIST(win.at)}</div>`;
     }
     if (canSubmit) {
       body += reqListHtml(t) + slotsHtml(t) + `
@@ -556,12 +557,14 @@ function captureMeta() {
   return { capturedAt: Date.now(), lat: l?.lat ?? null, lng: l?.lng ?? null, acc: l?.acc ?? null };
 }
 function updateGeoPill() {
+  updateSelfieGeo();
   const el = $('#geoPill');
   if (!el) return;
   const fresh = geo.last && Date.now() - geo.last.at < GEO_MAX_AGE;
   const st = geo.status === 'on' && fresh ? 'on' : geo.status === 'on' ? 'weak' : geo.status;
   el.className = 'geo-pill ' + st;
-  el.textContent = { on: `📍 Location on · ±${Math.round(geo.last?.acc || 0)} m`, finding: '📍 Finding location…', weak: '📍 Weak GPS signal…', denied: '📍 Location off', unavailable: '📍 No location on this device', idle: '' }[st] || '';
+  const txt = { on: `Location on · ±${Math.round(geo.last?.acc || 0)} m`, finding: 'Finding location…', weak: 'Weak GPS signal…', denied: 'Location off', unavailable: 'No location on this device', idle: '' }[st] || '';
+  el.innerHTML = txt ? icon('pin') + esc(txt) : '';
 }
 
 
@@ -621,6 +624,13 @@ function closeCam() {
   stopStream();
   stopGeo();
   $('#cam').classList.add('hidden');
+  if (cam.onShot) { // back to the onboarding task
+    cam.onShot = null;
+    cam.facing = 'environment';
+    $('.cam-modes').classList.remove('hidden');
+    document.body.style.overflow = '';
+    return renderSelfie();
+  }
   renderSheet();
 }
 
@@ -666,7 +676,9 @@ async function takePhoto() {
   if (cam.facing === 'user') { sctx.translate(src.width, 0); sctx.scale(-1, 1); }
   sctx.drawImage(v, 0, 0, src.width, src.height);
   const blob = await encodeJpeg(src);
-  if (blob) addCapture(blob, 'image', 'jpg');
+  if (!blob) return;
+  if (cam.onShot) cam.onShot(blob); // onboarding selfie
+  else addCapture(blob, 'image', 'jpg');
 }
 
 async function encodeJpeg(src) {
@@ -841,7 +853,7 @@ function showDone(taskId, items) {
   el.innerHTML = `
     <div class="done-card" role="alertdialog" aria-label="Submitted">
       <div class="truck-band" aria-hidden="true"></div>
-      <div class="done-check">✓</div>
+      <div class="done-check">${icon('check')}</div>
       <h2 class="sticker green">Submitted!</h2>
       <p><b>${esc(t ? t.title : 'Task')}</b>${items ? ` · ${items} item${items > 1 ? 's' : ''} uploaded` : ''}.<br>Organisers will review it soon, and you'll get a notification here.</p>
       <button class="btn block" id="doneOk">Back to tasks</button>
@@ -929,16 +941,17 @@ async function askNotifications() {
   try { perm.notif = await Notification.requestPermission(); } catch { perm.notif = Notification.permission; }
 }
 
+const SEP = icon('chevron-right', 'sep'); // breadcrumb separator in settings paths
 const FIX = {
   cam: IS_IOS
-    ? 'iPhone: open <b>Settings → Safari → Camera</b> and <b>Microphone</b> → <b>Allow</b> (or tap <b>aA</b> in the address bar → Website Settings), then tap Check again.'
-    : 'Tap the icon left of the address bar → <b>Permissions</b> → turn on <b>Camera</b> and <b>Microphone</b>, then tap Check again.',
+    ? 'iPhone: open <b>Settings ' + SEP + ' Safari ' + SEP + ' Camera</b> and <b>Microphone</b> ' + SEP + ' <b>Allow</b> (or tap <b>aA</b> in the address bar ' + SEP + ' Website Settings), then tap Check again.'
+    : 'Tap the icon left of the address bar ' + SEP + ' <b>Permissions</b> ' + SEP + ' turn on <b>Camera</b> and <b>Microphone</b>, then tap Check again.',
   geo: IS_IOS
-    ? 'iPhone: <b>Settings → Privacy & Security → Location Services</b> (on) → <b>Safari Websites → While Using</b>. Then tap Check again.'
-    : 'Tap the icon left of the address bar → <b>Permissions</b> → <b>Location → Allow</b>. Make sure location is on in your phone settings too.',
+    ? 'iPhone: <b>Settings ' + SEP + ' Privacy & Security ' + SEP + ' Location Services</b> (on) ' + SEP + ' <b>Safari Websites ' + SEP + ' While Using</b>. Then tap Check again.'
+    : 'Tap the icon left of the address bar ' + SEP + ' <b>Permissions</b> ' + SEP + ' <b>Location ' + SEP + ' Allow</b>. Make sure location is on in your phone settings too.',
   notif: IS_IOS
-    ? 'On iPhone, alerts only work after <b>Share → Add to Home Screen</b>, opening the app from there. Optional: you\'ll still see updates inside the app.'
-    : 'Tap the icon left of the address bar → <b>Permissions → Notifications → Allow</b>. Optional.',
+    ? 'On iPhone, alerts only work after <b>Share ' + SEP + ' Add to Home Screen</b>, opening the app from there. Optional: you\'ll still see updates inside the app.'
+    : 'Tap the icon left of the address bar ' + SEP + ' <b>Permissions ' + SEP + ' Notifications ' + SEP + ' Allow</b>. Optional.',
 };
 
 function permRow(key, title, why, required) {
@@ -946,39 +959,154 @@ function permRow(key, title, why, required) {
   const ok = s === 'granted' || s === 'granted-weak';
   const bad = s === 'denied' || s === 'error';
   const na = s === 'unsupported';
-  const badge = ok ? '<span class="pr-st ok">✓ Allowed</span>' : bad ? '<span class="pr-st bad">✕ Blocked</span>' : na ? '<span class="pr-st na">Not available</span>' : `<span class="pr-st todo">${required ? 'Needed' : 'Optional'}</span>`;
+  // Each row can be allowed on its own tap, so every prompt comes straight from a tap.
+  const badge = ok ? `<span class="pr-st ok">${icon('check')}Allowed</span>` : bad ? `<span class="pr-st bad">${icon('x')}Blocked</span>` : na ? '<span class="pr-st na">Not available</span>'
+    : `<button type="button" class="pr-st pr-ask" data-ask="${key}">Allow</button>`;
   const help = bad || (na && key === 'notif') ? `<div class="pr-help">${FIX[key]}</div>` : s === 'granted-weak' ? '<div class="pr-help">Allowed. GPS signal is weak here, but it will lock on outdoors.</div>' : '';
-  return `<div class="pr ${ok ? 'ok' : bad ? 'bad' : ''}"><div class="pr-ic">${{ cam: '📷', geo: '📍', notif: '🔔' }[key]}</div>
-    <div class="pr-body"><div class="pr-top"><b>${title}</b>${badge}</div><div class="muted small">${why}</div>${help}</div></div>`;
+  return `<div class="pr ${ok ? 'ok' : bad ? 'bad' : ''}"><div class="pr-ic">${icon({ cam: 'camera', geo: 'pin', notif: 'bell' }[key])}</div>
+    <div class="pr-body"><div class="pr-top"><b>${title}${required ? '' : ' <span class="pr-opt">optional</span>'}</b>${badge}</div><div class="muted small">${why}</div>${help}</div></div>`;
 }
+
+// New members (no selfie yet) must finish both steps: permissions, then a live selfie. No skipping.
+const needsOnboarding = () => !!state && !state.me.selfie;
 
 function renderPerms() {
   const camOk = perm.cam === 'granted';
+  const geoOk = ['granted', 'granted-weak', 'unsupported'].includes(perm.geo);
   const allDone = ['cam', 'geo', 'notif'].every(k => perm[k] !== 'prompt' && perm[k] !== 'unknown');
+  const onboarding = needsOnboarding();
   $('#perms').innerHTML = `
-    <div class="pr-hero"><h1>Get your phone <span class="sticker pink">ready</span></h1>
+    <div class="pr-hero">${onboarding ? '<span class="ob-step">Step 1 of 2</span>' : ''}<h1>Get your phone <span class="sticker pink">ready</span></h1>
       <p class="muted">Allow these once now, so nothing interrupts you mid-task.</p></div>
     <div class="card pr-list">
       ${permRow('cam', 'Camera & microphone', 'To take photos and record videos for tasks.', true)}
       ${permRow('geo', 'Location', 'Proves where each photo was taken. Organisers may reject submissions without it.', true)}
       ${permRow('notif', 'Notifications', 'Get alerted when organisers approve or reject.', false)}
     </div>
-    <button class="btn blue block" id="permAllow">${allDone ? 'Check again' : 'Allow all'}</button>
-    <button class="btn ${camOk ? '' : 'ghost'} block" id="permDone">${camOk ? "Let's go →" : 'Skip for now'}</button>
-    <p class="muted small" style="text-align:center; margin:0">Your phone will show its own pop-ups. Tap <b>Allow</b> on each.</p>`;
-  $('#permAllow').onclick = async e => {
+    ${onboarding && camOk && geoOk ? '' : `<button class="btn blue block" id="permAllow">${allDone ? 'Check again' : 'Allow all'}</button>`}
+    ${onboarding
+      ? `<button class="btn ${camOk && geoOk ? 'blue' : 'ghost'} block" id="permDone" ${camOk && geoOk ? '' : 'disabled'}>Next: onboarding task${icon('arrow-right')}</button>
+         ${camOk && geoOk ? '' : '<p class="muted small" style="text-align:center; margin:0">Camera and location are needed to join in.</p>'}`
+      : `<button class="btn ${camOk ? '' : 'ghost'} block" id="permDone">${camOk ? `Let's go${icon('arrow-right')}` : 'Skip for now'}</button>`}
+    ${allDone ? '' : '<p class="muted small" style="text-align:center; margin:0">Your phone will show its own pop-ups. Tap <b>Allow</b> on each.</p>'}`;
+  if ($('#permAllow')) $('#permAllow').onclick = async e => {
     e.target.disabled = true; e.target.textContent = 'Waiting for your phone…';
+    // Notifications first: browsers only show that prompt right after a tap, and the
+    // camera/location pop-ups take long enough that a later request gets auto-blocked.
+    if (perm.notif === 'prompt' || perm.notif === 'unknown') await askNotifications();
     if (perm.cam !== 'granted') await askCamera();
     if (perm.geo !== 'granted' && perm.geo !== 'granted-weak') await askLocation();
-    if (perm.notif === 'prompt' || perm.notif === 'unknown') await askNotifications();
     await refreshPerms().catch(() => {});
     renderPerms();
   };
+  document.querySelectorAll('[data-ask]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Waiting…';
+    await { cam: askCamera, geo: askLocation, notif: askNotifications }[b.dataset.ask]();
+    await refreshPerms().catch(() => {});
+    renderPerms();
+  });
   $('#permDone').onclick = async () => {
+    if (onboarding) return renderSelfie();
     if (!camOk && !await confirmBox('Skip camera setup?', "You won't be able to complete tasks until camera access is allowed. You can come back to this from the <b>Team</b> tab.", 'Skip')) return;
     store.set('mm_perms_' + (state?.me.id || ''), '1');
     closePerms();
   };
+}
+
+// ---------- Onboarding task: a selfie, shown like any other task ----------
+// The dashed slot opens the same full-screen camera players use for tasks (front camera, photo only).
+const selfie = { blob: null, url: null, meta: null, busy: false };
+
+function renderSelfie() {
+  const shot = !!selfie.blob;
+  $('#perms').innerHTML = `
+    <div class="ob-top"><span class="ob-step">Step 2 of 2</span><button class="linkbtn" id="selfieBack">${icon('arrow-left')}Permissions</button></div>
+    <div class="ob-task card">
+      <div class="head"><div class="pills"><span class="pill st-todo">Onboarding task</span><span class="pill ob-req">Required</span></div></div>
+      <h2>Take a picture</h2>
+      <p class="desc">Your first task! Snap a picture of yourself, or one with your team. It's a quick test to make sure your camera and location work before the real tasks.</p>
+      <div class="slot-sec">
+        <div class="slot-h"><span>Photo</span><span class="slot-n ${shot ? 'ok' : ''}">${shot ? icon('check') : ''}${shot ? 1 : 0}/1</span></div>
+        <div class="thumbs">${shot
+          ? `<div class="thumb"><img src="${selfie.url}" alt="Your picture"><button class="x" id="selfieRetake" aria-label="Retake">${icon('x')}</button></div>`
+          : `<button class="slot" id="selfieSlot">${icon('camera')}<span>Photo</span></button>`}</div>
+      </div>
+      <div id="selfieGeo" class="selfie-geo"></div>
+      <button class="btn lime block" id="selfieUse" ${shot ? '' : 'disabled'}>Submit task</button>
+    </div>`;
+  updateSelfieGeo();
+  startGeo();
+  $('#selfieBack').onclick = () => { stopGeo(); openPerms(); };
+  if (shot) $('#selfieRetake').onclick = () => { resetSelfieShot(); openSelfieCam(); };
+  else $('#selfieSlot').onclick = openSelfieCam;
+  $('#selfieUse').onclick = uploadSelfie;
+}
+
+function openSelfieCam() {
+  cam.mode = 'photo';
+  cam.facing = 'user';
+  cam.onShot = blob => {
+    selfie.meta = captureMeta();
+    selfie.blob = blob;
+    selfie.url = URL.createObjectURL(blob);
+    navigator.vibrate?.(30);
+    closeCam();
+  };
+  $('.cam-modes').classList.add('hidden');
+  $('#cam').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  updateCamUi();
+  startStream();
+  startGeo();
+}
+
+function updateSelfieGeo() {
+  const el = $('#selfieGeo');
+  if (!el) return;
+  const fresh = geo.last && Date.now() - geo.last.at < GEO_MAX_AGE;
+  const [cls, txt] = fresh ? ['on', `Location on · ±${Math.round(geo.last.acc || 0)} m`]
+    : geo.status === 'denied' ? ['bad', 'Location is blocked. Allow it to submit.']
+      : geo.status === 'unavailable' ? ['', 'No location on this device']
+        : ['', 'Finding your location…'];
+  el.className = 'selfie-geo ' + cls;
+  el.innerHTML = icon('pin') + esc(txt);
+  const use = $('#selfieUse');
+  if (use) use.disabled = !selfie.blob || geo.status === 'denied' || selfie.busy;
+}
+
+function resetSelfieShot() {
+  if (selfie.url) URL.revokeObjectURL(selfie.url);
+  selfie.blob = selfie.url = selfie.meta = null;
+}
+function stopSelfie() { stopGeo(); }
+
+async function uploadSelfie() {
+  if (selfie.busy || !selfie.blob) return;
+  if (geo.status === 'denied') return toast('Allow location first', 'Go back to permissions to fix it.');
+  selfie.busy = true;
+  const btn = $('#selfieUse');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  // Use a location fix that arrived after the shot if there wasn't one at the time.
+  const m = selfie.meta?.lat != null ? selfie.meta : { ...captureMeta(), capturedAt: selfie.meta?.capturedAt ?? Date.now() };
+  const fd = new FormData();
+  fd.append('captured_at', m.capturedAt ?? '');
+  if (m.lat != null) { fd.append('lat', m.lat); fd.append('lng', m.lng); fd.append('accuracy', m.acc ?? ''); }
+  fd.append('media', selfie.blob, 'selfie.jpg');
+  try {
+    const r = await fetch('/api/me/selfie', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Upload failed');
+    state.me.selfie = data.selfie;
+    stopSelfie();
+    resetSelfieShot();
+    store.set('mm_perms_' + state.me.id, '1');
+    closePerms();
+    render();
+    toast(`Onboarding task done, ${state.me.name.split(' ')[0]}!`, "You're in. Pick a task and go.");
+  } catch (e) {
+    toast("Couldn't save your picture", e.message === 'Failed to fetch' ? 'No connection. Try again.' : e.message, 'rejected');
+    btn.disabled = false; btn.textContent = 'Submit task';
+  } finally { selfie.busy = false; }
 }
 
 async function openPerms() {
@@ -1005,7 +1133,8 @@ async function boot() {
   $('#join').classList.add('hidden');
   $('#app').classList.remove('hidden');
   connect();
-  // First time on this device: walk through permissions before the task list.
-  if (!store.get('mm_perms_' + state.me.id)) openPerms();
+  // New member: permissions, then a selfie, before the task list (once per member, on any device).
+  // Already onboarded but first time on this device: just re-check permissions.
+  if (needsOnboarding() || !store.get('mm_perms_' + state.me.id)) openPerms();
 }
 boot();

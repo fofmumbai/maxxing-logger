@@ -92,6 +92,13 @@
     .capture { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .capture .btn { min-height: 64px; border-radius: 20px; flex-direction: column; gap: 4px; font-size: 15px; }
     .capture svg { width: 24px; height: 24px; }
+    .done-check .i { width: 44px; height: 44px; stroke-width: 2.6; }
+    .pr-ic .i { width: 22px; height: 22px; }
+    .perm-ics { display: inline-flex; gap: 6px; }
+    .perm-ics .i { width: 18px; height: 18px; }
+    .thumb .x { display: grid; place-items: center; padding: 0; }
+    .thumb .x .i, .thumb .ok .i { width: 14px; height: 14px; stroke-width: 2.6; }
+    .slot-n { display: inline-flex; align-items: center; gap: 3px; }
     .slot-sec { display: grid; gap: 8px; }
     .slot-h { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #6b5410; }
     .slot-n { font-size: 13px; letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -139,6 +146,20 @@
     .pr-hero .hl { background: var(--lime); border-radius: var(--pill); padding: 0 .2em; }
     .pr-hero p { margin: 10px 0 0; }
     .pr-list { padding: 6px 16px; }
+    /* Onboarding */
+    .ob-step { display: inline-block; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; background: var(--ink); color: var(--white); border-radius: var(--pill); padding: 4px 10px; margin-bottom: 10px; }
+    .ob-top { display: flex; justify-content: space-between; align-items: center; }
+    .ob-top .ob-step { margin: 0; }
+    .ob-top .linkbtn { display: inline-flex; align-items: center; gap: 4px; padding: 8px 0; }
+    .ob-task { padding: 20px 18px; display: grid; gap: 16px; }
+    .ob-task .head .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ob-task h2 { font-size: 26px; }
+    .ob-task .desc { margin: -6px 0 0; color: #444; }
+    .ob-req { background: var(--ink); color: var(--white); }
+    .ob-task .selfie-geo { justify-self: start; }
+    .selfie-geo { justify-self: center; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+    .selfie-geo.on { color: var(--ok-fg); }
+    .selfie-geo.bad { color: var(--bad-fg); }
     .pr { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
     .pr:last-child { border-bottom: 0; }
     .pr-ic { width: 44px; height: 44px; border-radius: 14px; background: var(--paper); display: grid; place-items: center; font-size: 22px; flex: none; }
@@ -149,6 +170,9 @@
     .pr-st { font-size: 12px; font-weight: 700; border-radius: var(--pill); padding: 3px 9px; white-space: nowrap; }
     .pr-st.ok { background: #D3F5E2; color: #0d6b3a; }
     .pr-st.bad { background: #FFE0E0; color: var(--maroon); }
+    .pr-ask { border: 2px solid var(--ink); background: var(--blue); color: var(--white); font: inherit; font-size: 12px; font-weight: 800; padding: 4px 12px; cursor: pointer; box-shadow: 2px 2px 0 var(--ink); }
+    .pr-ask:disabled { opacity: .6; box-shadow: none; }
+    .pr-opt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 4px; }
     .pr-st.todo { background: var(--paper); color: var(--muted); }
     .pr-st.na { background: var(--paper); color: var(--muted); }
     .pr-help { font-size: 13px; background: #FFF4EC; color: #6b2f0c; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
@@ -188,6 +212,7 @@
     /* Team */
     .member { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
     .avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; }
+    img.avatar { object-fit: cover; display: block; flex: none; }
     .codebox { padding: 20px; display: grid; gap: 6px; text-align: center; background: var(--ink); color: var(--white); }
     .codebox b { font-size: 34px; letter-spacing: .25em; }
 
@@ -254,7 +279,7 @@
     <form id="joinForm" class="truck-frame">
       <div class="panel">
       <p class="intro"><b>Join your team</b> with the room code from your organiser. Max 4 members per team.</p>
-      <p class="small">📍 Photos and videos you send record when and where they were taken, so organisers can verify tasks.</p>
+      <p class="small loc-note"><span data-icon="pin"></span>Photos and videos you send record when and where they were taken, so organisers can verify tasks.</p>
       <div class="field">
         <label for="codeInput">Room code</label>
         <input id="codeInput" class="input" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8" placeholder="ABC123" required>
@@ -264,7 +289,7 @@
         <input id="nameInput" class="input" autocomplete="given-name" maxlength="40" placeholder="e.g. Priya" required>
       </div>
       <div id="joinErr" class="err hidden"></div>
-      <button class="btn truck-cta block" id="joinBtn" type="submit">Join team →</button>
+      <button class="btn truck-cta block" id="joinBtn" type="submit">Join team<span data-icon="arrow-right"></span></button>
       </div>
     </form>
     <p class="tagline">Friends of Figma Mumbai · Creativity. Collaboration. Continuous Learning.</p>
@@ -338,6 +363,7 @@
   </div>
 
   <div id="sheetHost"></div>
+  <script src="/icons.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

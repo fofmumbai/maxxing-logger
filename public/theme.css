@@ -268,3 +268,46 @@ body.admin #login .wm { width: 220px; height: auto; }
 body.admin .sub .team { color: var(--wf-blue); }
 body.admin .mchip { background: var(--cream); }
 body.admin .media .m { border: 2px solid var(--ink); }
+
+/* ===== Consistency layer (both apps) =====
+   One palette per status, used by every pill, banner, icon and highlight:
+   approved = green · in review / to review = amber · rejected = pink · not started = cream. */
+:root {
+  --ok-bg: #D3F0D2;   --ok-fg: #0b5a2f;
+  --wait-bg: #FFE9B8; --wait-fg: #6b3d00; --wait-line: #F2A516;
+  --bad-bg: #FFD6E3;  --bad-fg: #8a0f3a;
+}
+.st-approved, .feedback.approved, .pr-st.ok, .reviewed.approved, .task.approved .pts { background: var(--ok-bg); color: var(--ok-fg); }
+.st-pending, .feedback.pending, .ic.pending { background: var(--wait-bg); color: var(--wait-fg); }
+.st-rejected, .feedback.rejected, .pr-st.bad, .reviewed.rejected, .err { background: var(--bad-bg); color: var(--bad-fg); }
+.pr.ok .pr-ic { background: var(--ok-bg); }
+.pr.bad .pr-ic { background: var(--bad-bg); }
+.task .sub.approved { color: var(--ok-fg); }
+.task .sub.pending { color: var(--wait-fg); }
+.task .sub.rejected { color: var(--bad-fg); }
+.cap.none { color: var(--bad-fg); }
+body.admin .tcard.has-pending { border-color: var(--wait-line); }
+body.admin .review-tag { background: var(--wait-bg); color: var(--wait-fg); border: 2px solid var(--ink); }
+body.admin .trow.st-pending-row { box-shadow: inset 5px 0 0 var(--wait-line), var(--hard); }
+
+/* Icon buttons look like the other small buttons: cream, ink outline, hard shadow. */
+body.admin .icon-btn { background: var(--cream); border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); color: var(--ink); }
+body.admin .icon-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink); }
+body.admin .icon-btn:disabled { box-shadow: none; }
+/* Destructive row actions: one style everywhere (outlined, pink, trash icon). */
+body.admin .danger-ghost { background: #fff; color: var(--bad-fg); border: 2px solid var(--bad-fg); box-shadow: 2px 2px 0 var(--bad-fg); }
+body.admin .danger-ghost:hover { background: var(--bad-bg); }
+
+/* Submitted photos/videos use the same square size as the upload slots. */
+.thumbs.fixed { grid-template-columns: repeat(auto-fill, 84px); grid-auto-rows: 84px; }
+.thumbs.fixed .thumb { width: 84px; height: 84px; aspect-ratio: auto; border-radius: 12px; }
+.thumbs.fixed .tag { left: 4px; bottom: 4px; font-size: 10px; padding: 1px 6px; }
+
+/* Leaderboard: stats sit under the team name instead of squeezing it. */
+body.admin .lbrow .name { display: grid; gap: 2px; min-width: 0; }
+body.admin .lbrow .lbstat { font-size: 13px; font-weight: 400; color: var(--muted); }
+
+/* Admin tab bar fits a small phone without cutting off the last tab. */
+@media (max-width: 420px) {
+  body.admin .tabs a { padding: 8px 6px; font-size: 12.5px; }
+}

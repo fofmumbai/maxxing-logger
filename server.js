@@ -65,7 +65,7 @@ function bearer(req) {
   return h.startsWith('Bearer ') ? h.slice(7) : (req.query.token || '');
 }
 function teamAuth(req, res, next) {
-  const m = db.prepare(`SELECT m.id, m.name, m.team_id FROM members m WHERE m.token = ?`).get(bearer(req));
+  const m = db.prepare(`SELECT m.id, m.name, m.team_id, m.selfie FROM members m WHERE m.token = ?`).get(bearer(req));
   if (!m) return res.status(401).json({ error: 'Session expired. Please join again with your room code.' });
   req.member = m;
   next();
@@ -131,9 +131,19 @@ function mediaFor(subIds) {
   }));
   return out;
 }
+// Members as sent to the apps: the selfie becomes a /media URL plus when and where it was taken.
+const MEMBER_COLS = 'id, team_id, name, created_at, selfie, selfie_captured_at, selfie_lat, selfie_lng, selfie_accuracy, selfie_uploaded_at';
+function memberOut(m) {
+  return {
+    id: m.id, team_id: m.team_id, name: m.name, created_at: m.created_at,
+    selfie: m.selfie ? '/media/' + m.selfie : null,
+    selfieAt: m.selfie_captured_at, selfieUploadedAt: m.selfie_uploaded_at,
+    selfieLat: m.selfie_lat, selfieLng: m.selfie_lng, selfieAccuracy: m.selfie_accuracy,
+  };
+}
 function teamState(teamId) {
   const team = db.prepare(`${scoreSql} WHERE t.id = ?`).get(teamId);
-  const members = db.prepare('SELECT id, name, created_at FROM members WHERE team_id = ? ORDER BY id').all(teamId);
+  const members = db.prepare(`SELECT ${MEMBER_COLS} FROM members WHERE team_id = ? ORDER BY id`).all(teamId).map(memberOut);
   const tasks = db.prepare('SELECT id, title, description, points, min_photos, min_videos, needs_link, link_label, allow_gallery, opens_at, closes_at FROM tasks ORDER BY sort, id').all();
   const subs = db.prepare(`
     SELECT s.*, m.name AS member_name, k.title AS task_title, k.points
@@ -173,7 +183,7 @@ app.post('/api/join', (req, res) => {
 });
 
 app.get('/api/me', teamAuth, (req, res) => {
-  res.json({ me: { id: req.member.id, name: req.member.name }, serverNow: Date.now(), ...teamState(req.member.team_id) });
+  res.json({ me: { id: req.member.id, name: req.member.name, selfie: req.member.selfie ? '/media/' + req.member.selfie : null }, serverNow: Date.now(), ...teamState(req.member.team_id) });
 });
 
 app.get('/api/leaderboard', teamAuth, (req, res) => {
@@ -231,6 +241,25 @@ app.post('/api/uploads', teamAuth, (req, res) => {
       .run(req.member.id, req.member.team_id, f.filename, f.mimetype, f.mimetype.startsWith('video/') ? 'video' : 'image', f.size,
         g.captured_at, g.lat, g.lng, g.accuracy, Date.now(), g.source);
     res.json({ id: r.lastInsertRowid, size: f.size });
+  });
+});
+
+// Onboarding selfie: one live photo per member. Taking a new one replaces the old file.
+app.post('/api/me/selfie', teamAuth, (req, res) => {
+  upload.single('media')(req, res, err => {
+    const f = req.file;
+    if (err || !f || !f.mimetype.startsWith('image/')) {
+      if (f) fs.unlink(f.path, () => {});
+      return res.status(400).json({ error: err?.code === 'LIMIT_FILE_SIZE' ? `Photo is larger than ${MAX_FILE_MB} MB.` : err?.message || 'Send a photo.' });
+    }
+    const g = captureMeta(req.body);
+    const old = req.member.selfie;
+    db.prepare(`UPDATE members SET selfie = ?, selfie_size = ?, selfie_captured_at = ?, selfie_lat = ?, selfie_lng = ?, selfie_accuracy = ?, selfie_uploaded_at = ? WHERE id = ?`)
+      .run(f.filename, f.size, g.captured_at, g.lat, g.lng, g.accuracy, Date.now(), req.member.id);
+    if (old) fs.unlink(path.join(UPLOAD_DIR, old), () => {});
+    toTeam(req.member.team_id, 'refresh', {});
+    toAdmins('reviewed', { teamId: req.member.team_id }); // refreshes the team list and that team's page
+    res.json({ selfie: '/media/' + f.filename });
   });
 });
 
@@ -452,7 +481,7 @@ app.post('/api/admin/submissions/:id/review', adminAuth, (req, res) => {
 app.get('/api/admin/teams', adminAuth, (req, res) => {
   const sc = teamScope(req, 't.id');
   const teams = db.prepare(`${scoreSql} WHERE ${sc.sql} ORDER BY t.id`).all(...sc.args);
-  const members = db.prepare('SELECT id, team_id, name, created_at FROM members ORDER BY id').all();
+  const members = db.prepare(`SELECT ${MEMBER_COLS} FROM members ORDER BY id`).all().map(memberOut);
   const reviewers = req.admin.super ? db.prepare('SELECT at.team_id, a.name FROM admin_teams at JOIN admins a ON a.id = at.admin_id ORDER BY a.name').all() : [];
   teams.forEach(t => {
     t.members = members.filter(m => m.team_id === t.id);
@@ -503,8 +532,9 @@ function deleteSubmissions(subIds) {
 
 // Remove a member. ?withMedia=1 also deletes every submission they sent (and its photos/videos).
 app.delete('/api/admin/members/:id', adminAuth, superOnly, (req, res) => {
-  const m = db.prepare('SELECT team_id FROM members WHERE id = ?').get(req.params.id);
+  const m = db.prepare('SELECT team_id, selfie FROM members WHERE id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Member not found' });
+  if (m.selfie) fs.unlink(path.join(UPLOAD_DIR, m.selfie), () => {});
   let files = 0;
   db.transaction(() => {
     if (req.query.withMedia === '1') {
@@ -527,6 +557,7 @@ app.delete('/api/admin/teams/:id', adminAuth, superOnly, (req, res) => {
   db.transaction(() => {
     files = deleteSubmissions(db.prepare('SELECT id FROM submissions WHERE team_id = ?').all(t.id).map(r => r.id));
     db.prepare('SELECT filename FROM uploads WHERE team_id = ?').all(t.id).forEach(u => fs.unlink(path.join(UPLOAD_DIR, u.filename), () => {}));
+    db.prepare('SELECT selfie FROM members WHERE team_id = ? AND selfie IS NOT NULL').all(t.id).forEach(m => fs.unlink(path.join(UPLOAD_DIR, m.selfie), () => {}));
     // Forget its Drive folders so a future team that reuses this id gets fresh ones.
     db.prepare("DELETE FROM drive_folders WHERE key = ? OR key LIKE ?").run(`team:${t.id}`, `team:${t.id}:%`);
     db.prepare('DELETE FROM teams WHERE id = ?').run(t.id); // members, submissions and uploads cascade

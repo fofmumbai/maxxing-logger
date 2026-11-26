@@ -118,3 +118,14 @@ select.input {
 
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Icons (public/icons.js). Sized by font-size so they match the text next to them. */
+.i { width: 1.15em; height: 1.15em; flex: none; vertical-align: -0.22em; }
+/* Leading icon + text: one consistent gap. */
+.req-pill .i, .tag .i, .cap .i, .sub-link .i, .src-gal .i, .lb-cap .i, .toggle-row .i, .stepper > span .i,
+.geo-pill .i, .sched .i, .sched-bar .i, .feedback .i, .pr-st .i, .loc-note .i { margin-right: .35em; }
+.perm-go .i, .sub .team .i { margin-left: .2em; }
+.i.sep { width: 1em; height: 1em; margin: 0 .1em; opacity: .6; }
+/* Requirement chips under task titles: icon + count, evenly spaced. */
+.req-chips { display: inline-flex; align-items: center; gap: 8px; vertical-align: -0.2em; }
+.req-chips > span { display: inline-flex; align-items: center; gap: 2px; }

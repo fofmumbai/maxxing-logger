@@ -96,6 +96,15 @@ for (const table of ['uploads', 'media']) {
   for (const [col, def] of CAPTURE_COLS) if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }
 
+// Onboarding selfie: every member takes one live photo with the in-app camera before seeing tasks.
+// Proves camera (and location) access works on their phone, and gives organisers a face for each name.
+{
+  const cols = db.prepare('PRAGMA table_info(members)').all().map(c => c.name);
+  for (const [col, def] of [['selfie', 'TEXT'], ['selfie_size', 'INTEGER'], ['selfie_captured_at', 'INTEGER'], ['selfie_lat', 'REAL'], ['selfie_lng', 'REAL'], ['selfie_accuracy', 'REAL'], ['selfie_uploaded_at', 'INTEGER']]) {
+    if (!cols.includes(col)) db.exec(`ALTER TABLE members ADD COLUMN ${col} ${def}`);
+  }
+}
+
 // Reviewer accounts created by the super admin, and the teams each one reviews.
 db.exec(`
 CREATE TABLE IF NOT EXISTS admins (
