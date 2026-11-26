@@ -92,8 +92,6 @@
     .mchip .kick { border: 0; background: var(--white); cursor: pointer; color: var(--maroon); font-size: 12px; font-weight: 700; border-radius: var(--pill); padding: 4px 10px; margin-left: 4px; }
     .mchip .kick:hover { background: #FFE0E0; }
     /* Check-in */
-    .ci-quick { margin-bottom: 16px; }
-    .ci-quick .ci-qic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--blue); color: var(--white); flex: none; }
     .ci-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
     .ci-cfg { flex-wrap: wrap; align-items: flex-end; }
     .ci-cfg .field { flex: 1; min-width: 140px; display: grid; gap: 6px; }
@@ -333,10 +331,10 @@
         <nav class="tabs">
           <a href="#/teams" data-tab="teams">Teams</a>
           <a href="#/queue" data-tab="queue">Review<span class="long"> queue</span><span class="badge" id="pendingBadge"></span></a>
-          <a href="#/board" data-tab="board"><span class="long">Leaderboard</span><span class="short">Board</span></a>
+          <a href="#/board" data-tab="board" data-super><span class="long">Leaderboard</span><span class="short">Board</span></a>
           <a href="#/tasks" data-tab="tasks" data-super>Tasks</a>
           <a href="#/checkin" data-tab="checkin" data-super>Check-in</a>
-          <a href="#/admins" data-tab="admins" data-super>Admins</a>
+          <a href="#/reviewers" data-tab="reviewers" data-super>Reviewers</a>
           <a href="#/settings" data-tab="settings">Settings</a>
         </nav>
       </div>

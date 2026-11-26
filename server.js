@@ -571,7 +571,7 @@ app.post('/api/admin/admins', adminAuth, superOnly, (req, res) => {
 });
 app.put('/api/admin/admins/:id', adminAuth, superOnly, (req, res) => {
   const id = +req.params.id;
-  if (!db.prepare('SELECT 1 FROM admins WHERE id = ?').get(id)) return res.status(404).json({ error: 'Admin not found' });
+  if (!db.prepare('SELECT 1 FROM admins WHERE id = ?').get(id)) return res.status(404).json({ error: 'Reviewer not found' });
   const a = cleanAdmin(req.body, false);
   if (a.error) return res.status(400).json(a);
   if (db.prepare('SELECT 1 FROM admins WHERE username = ? AND id != ?').get(a.username, id)) return res.status(409).json({ error: 'That username is already in use.' });
@@ -662,8 +662,8 @@ app.get('/api/admin/teams/:id', adminAuth, (req, res) => {
   st.team.rejected = db.prepare(`SELECT COUNT(*) n FROM submissions WHERE team_id = ? AND status = 'rejected'`).get(id).n;
   res.json(st);
 });
-app.get('/api/admin/leaderboard', adminAuth, (req, res) =>
-  res.json(req.admin.super ? leaderboard() : leaderboard().map(({ id, name, points }) => ({ id, name, points }))));
+// Super admin only: reviewers don't see other teams' scores.
+app.get('/api/admin/leaderboard', adminAuth, superOnly, (req, res) => res.json(leaderboard()));
 
 app.post('/api/admin/teams', adminAuth, superOnly, (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM teams').get().n;

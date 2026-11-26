@@ -90,9 +90,10 @@ function logout() {
 // ---------- Router ----------
 function parseRoute() {
   const h = location.hash.replace(/^#\/?/, '');
-  const [name, id] = h.split('/');
+  let [name, id] = h.split('/');
+  if (name === 'admins') name = 'reviewers'; // old link
   if (name === 'team' && id) return { name: 'team', id: +id };
-  const allowed = isSuper() ? ['teams', 'queue', 'board', 'tasks', 'checkin', 'qr', 'admins', 'settings'] : ['teams', 'queue', 'board', 'settings'];
+  const allowed = isSuper() ? ['teams', 'queue', 'board', 'tasks', 'checkin', 'qr', 'reviewers', 'settings'] : ['teams', 'queue', 'settings'];
   return { name: allowed.includes(name) ? name : 'teams' };
 }
 window.addEventListener('hashchange', () => { if (!token) return; route = parseRoute(); window.scrollTo(0, 0); render(); });
@@ -103,7 +104,7 @@ function render() {
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   $('.tabs a.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   tabsFade();
-  ({ teams: viewTeams, team: () => viewTeam(route.id), queue: viewQueue, board: viewBoard, tasks: viewTasks, checkin: viewCheckin, qr: viewQr, admins: viewAdmins, settings: viewSettings })[route.name]()
+  ({ teams: viewTeams, team: () => viewTeam(route.id), queue: viewQueue, board: viewBoard, tasks: viewTasks, checkin: viewCheckin, qr: viewQr, reviewers: viewAdmins, settings: viewSettings })[route.name]()
     .catch(err => err.message !== 'Logged out' && paint(`<div class="empty">${esc(err.message)}</div>`));
   loadSummary().catch(() => {}); // the badge is best-effort; a 401 already logs out inside api()
 }
@@ -228,7 +229,7 @@ async function viewTeams() {
   paint(`
     <div class="toolbar">
       <h2>Teams</h2>
-      <div class="stats"><span class="pill st-pending">${totals.pending} to review</span><span class="pill st-todo">${totals.members} players joined</span></div>
+      <div class="stats"><span class="pill st-pending">${totals.pending} to review</span><span class="pill st-todo">${totals.members} player${totals.members === 1 ? "" : "s"} joined</span></div>
       <select class="input sm" id="teamSort">
         <option value="pending" ${teamSort === 'pending' ? 'selected' : ''}>Sort: needs review first</option>
         <option value="number" ${teamSort === 'number' ? 'selected' : ''}>Sort: team number</option>
@@ -238,7 +239,6 @@ async function viewTeams() {
       <button class="btn sm" id="printCodes">Print room codes</button>` : ''}
     </div>
     ${!isSuper() && !sorted.length ? '<div class="empty">No teams are assigned to you yet. Ask the super admin to assign your teams.</div>' : ''}
-    ${isSuper() ? await checkinQuickCard() : ''}
     <div class="teamgrid">${sorted.map(t => `
       <a class="card tcard ${t.pending ? 'has-pending' : ''}" href="#/team/${t.id}">
         ${t.pending ? `<span class="review-tag">${t.pending} to review</span>` : ''}
@@ -264,7 +264,6 @@ async function viewTeams() {
     if (await confirmDeleteTeam(+b.dataset.delTeam)) viewTeams();
   });
   if (!isSuper()) return;
-  bindCheckinToggle();
   $('#addTeam').onclick = async () => {
     const name = prompt('Team name', '');
     if (name === null) return;
@@ -605,11 +604,11 @@ async function viewAdmins() {
   const unassigned = teams.filter(t => !covered.has(t.id));
   paint(`
     <div class="toolbar">
-      <h2>Admins</h2>
+      <h2>Reviewers</h2>
       <span class="muted small">${admins.length} reviewer${admins.length === 1 ? '' : 's'} · ${unassigned.length ? `${unassigned.length} team${unassigned.length === 1 ? '' : 's'} without a reviewer` : 'every team has a reviewer'}</span>
-      <button class="btn blue sm" id="newAdminBtn">+ New admin</button>
+      <button class="btn blue sm" id="newAdminBtn">+ New reviewer</button>
     </div>
-    <p class="muted small" style="margin:-6px 0 14px">Admins log in at <b>${esc(location.origin)}/admin</b> with the username and password you set. They only see their assigned teams and can approve or reject submissions. You (<b>${esc(superUsername)}</b>) can do everything.</p>
+    <p class="muted small" style="margin:-6px 0 14px">Reviewers log in at <b>${esc(location.origin)}/admin</b> with the username and password you set. They only see their assigned teams and can approve or reject submissions. You (<b>${esc(superUsername)}</b>) can do everything.</p>
     <div class="alist">${admins.map(a => `
       <div class="card aitem">
         <div class="who">
@@ -620,13 +619,13 @@ async function viewAdmins() {
           <button class="btn ghost sm" data-edit-admin="${a.id}">Edit</button>
           <button class="btn sm danger-ghost" data-del-admin="${a.id}">${ICON_TRASH}Delete</button>
         </div>
-      </div>`).join('') || '<div class="empty">No admins yet. Add one with “+ New admin” and assign their teams.</div>'}</div>`);
+      </div>`).join('') || '<div class="empty">No reviewers yet. Add one with “+ New reviewer” and assign their teams.</div>'}</div>`);
   $('#newAdminBtn').onclick = () => editAdmin(null, admins, teams);
   $$('[data-edit-admin]').forEach(b => b.onclick = () => editAdmin(admins.find(a => a.id === +b.dataset.editAdmin), admins, teams));
   $$('[data-del-admin]').forEach(b => b.onclick = async () => {
     const a = admins.find(x => x.id === +b.dataset.delAdmin);
     if (!await choose(`Delete ${a.name}?`, `<b>@${esc(a.username)}</b> is signed out and can no longer log in. Reviews they already made stay.`,
-      [{ label: 'Delete admin', value: true, kind: 'danger' }])) return;
+      [{ label: 'Delete reviewer', value: true, kind: 'danger' }])) return;
     try { await api('/api/admin/admins/' + a.id, { method: 'DELETE' }); toast(`${a.name} deleted`); viewAdmins(); }
     catch (err) { toast('Error', err.message, 'rejected'); }
   });
@@ -646,7 +645,7 @@ function editAdmin(admin, admins, teams) {
   el.className = 'dlg-scrim';
   el.innerHTML = `
     <form class="dlg card tedit" autocomplete="off">
-      <div class="tedit-hd"><h3>${admin ? 'Edit admin' : 'New admin'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">${icon('x')}</button></div>
+      <div class="tedit-hd"><h3>${admin ? 'Edit reviewer' : 'New reviewer'}</h3><button type="button" class="icon-btn" data-close aria-label="Close">${icon('x')}</button></div>
       <label class="fl">Name<input class="input" name="name" maxlength="60" required value="${esc(a.name)}" placeholder="e.g. Priya"></label>
       <label class="fl">Username<input class="input" name="username" maxlength="40" required value="${esc(a.username)}" placeholder="e.g. priya" autocapitalize="none" spellcheck="false"></label>
       <label class="fl">${admin ? 'New password <span class="muted small">(leave empty to keep the current one)</span>' : 'Password'}
@@ -663,8 +662,8 @@ function editAdmin(admin, admins, teams) {
           <input type="checkbox" name="team" value="${t.id}" ${a.teamIds.includes(t.id) ? 'checked' : ''}><span>${esc(t.name)}${others[t.id] ? ` · ${esc(others[t.id].join(', '))}` : ''}</span></label>`).join('')}</div>
         <p class="muted small hint" id="pickCount"></p>
       </fieldset>
-      ${admin ? '<p class="muted small hint">Changing the password signs this admin out on every device.</p>' : ''}
-      <div class="dlg-actions"><button type="button" class="btn sm ghost" data-close>Cancel</button><button class="btn sm blue">${admin ? 'Save changes' : 'Create admin'}</button></div>
+      ${admin ? '<p class="muted small hint">Changing the password signs this reviewer out on every device.</p>' : ''}
+      <div class="dlg-actions"><button type="button" class="btn sm ghost" data-close>Cancel</button><button class="btn sm blue">${admin ? 'Save changes' : 'Create reviewer'}</button></div>
     </form>`;
   document.body.appendChild(el);
   const f = el.querySelector('form');
@@ -685,8 +684,8 @@ function editAdmin(admin, admins, teams) {
       await api(admin ? '/api/admin/admins/' + admin.id : '/api/admin/admins', { method: admin ? 'PUT' : 'POST', body: JSON.stringify(body) });
       el.remove();
       const login = body.password ? `Username: ${body.username.trim().toLowerCase()} · Password: ${body.password}` : '';
-      toast(admin ? 'Admin saved' : 'Admin created', login ? login + ' (share these with them)' : '', 'approved');
-      if (login) try { await navigator.clipboard.writeText(`${location.origin}/admin\nUsername: ${body.username.trim().toLowerCase()}\nPassword: ${body.password}`); toast('Login details copied', 'Paste them to the admin.'); } catch {}
+      toast(admin ? 'Reviewer saved' : 'Reviewer created', login ? login + ' (share these with them)' : '', 'approved');
+      if (login) try { await navigator.clipboard.writeText(`${location.origin}/admin\nUsername: ${body.username.trim().toLowerCase()}\nPassword: ${body.password}`); toast('Login details copied', 'Paste them to the reviewer.'); } catch {}
       viewAdmins();
     } catch (err) { toast('Error', err.message, 'rejected'); }
   };
@@ -737,17 +736,6 @@ const fmtSecs = ms => new Date(ms).toLocaleTimeString('en-IN', { ...IST, hour: '
 async function setCheckin(body) {
   try { await api('/api/admin/checkin/settings', { method: 'POST', body: JSON.stringify(body) }); return true; }
   catch (err) { toast('Error', err.message, 'rejected'); return false; }
-}
-async function checkinQuickCard() {
-  const d = await api('/api/admin/checkin');
-  const withMembers = d.teams.filter(t => t.total);
-  const inCount = withMembers.filter(t => t.arrivedAt).length;
-  return `<div class="card setting ci-quick">
-    <span class="ci-qic">${icon('pin')}</span>
-    <div><b>End-of-day check-in</b><div class="muted small">${d.open ? `Open · ${inCount}/${withMembers.length} teams in` : `Off · deadline ${fmtTime(d.deadline)} IST`}</div></div>
-    <a class="btn ghost sm" href="#/checkin">Manage</a>
-    <label class="switch" title="Check-in open"><input type="checkbox" id="ciOpen" ${d.open ? 'checked' : ''}><span></span></label>
-  </div>`;
 }
 function bindCheckinToggle() {
   const sw = $('#ciOpen');
@@ -1081,7 +1069,7 @@ function connect() {
   es.addEventListener('signout', () => { logout(); $('#loginErr').textContent = 'You were signed out. Log in again with your new password.'; });
   es.addEventListener('drive', () => route.name === 'settings' && render());
   es.addEventListener('checkin', () => {
-    if (route.name === 'checkin' || route.name === 'teams') render();
+    if (route.name === 'checkin') render();
     else if (route.name === 'qr') refreshQrStats();
   });
 }
