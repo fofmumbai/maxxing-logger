@@ -121,6 +121,7 @@ function render() {
   $('#progressLabel').textContent = `${team.approved}/${tasks.length} done`;
   $('#boardBtn').classList.toggle('hidden', !state.showLeaderboard);
   if (!state.showLeaderboard && tab === 'board') setTab('tasks');
+  renderCheckinBar();
 
   const n = unreadCount();
   $('#unreadDot').textContent = n;
@@ -1012,6 +1013,121 @@ function renderPerms() {
     closePerms();
   };
 }
+
+// ---------- End-of-day check-in ----------
+// While organisers have check-in open, a banner floats at the top. Each member scans the QR code on the
+// organisers' screen at the venue. It's not a task: it has its own banner and scanner.
+function renderCheckinBar() {
+  const el = $('#checkinBar');
+  const c = state?.checkin;
+  if (!el) return;
+  if (!c?.open) { el.className = 'ci-bar hidden'; el.innerHTML = ''; return; }
+  const late = c.arrivedAt ? c.lateMin : Math.max(0, Math.ceil((now() - c.deadline) / 60000));
+  const pts = late * c.perMinute;
+  if (!c.arrivedAt) {
+    el.className = 'ci-bar todo' + (late ? ' late' : '');
+    el.innerHTML = `<div class="wrap ci-in"><span class="ci-ic">${icon('pin')}</span>
+      <div class="ci-txt"><b>Check-in is open</b><span>${late
+        ? `${late} min late · your team has lost ${pts} pts so far`
+        : `Be back by ${fmtClock(c.deadline)} · one scan per team at the venue`}</span></div>
+      <button class="btn sm ci-btn" id="ciScan">Scan QR</button></div>`;
+    $('#ciScan').onclick = openScanner;
+    return;
+  }
+  // Any one member's scan checks in the whole team.
+  el.className = 'ci-bar done';
+  const who = c.meAt && c.meAt === c.arrivedAt ? 'you' : esc(c.arrivedBy || 'a teammate');
+  el.innerHTML = `<div class="wrap ci-in"><span class="ci-ic">${icon('check')}</span>
+    <div class="ci-txt"><b>Your team is checked in · ${fmtClock(c.arrivedAt)}</b><span>Scanned by ${who} · ${c.lateMin ? `${c.lateMin} min late (−${c.penalty} pts)` : 'on time'}</span></div></div>`;
+}
+// Keep the "late by" line ticking while the banner is up.
+setInterval(() => { if (state?.checkin?.open) renderCheckinBar(); }, 10000);
+
+const scan = { stream: null, timer: null, busy: false, detector: null, paused: false };
+function scanMsg(text, kind = '') {
+  const el = $('#scanMsg');
+  el.className = 'scan-msg ' + kind;
+  el.textContent = text;
+}
+function loadJsQR() {
+  if (window.jsQR) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/vendor/jsQR.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("Couldn't load the scanner. Check your connection."));
+    document.head.appendChild(s);
+  });
+}
+async function openScanner() {
+  $('#scan').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  scanMsg("Point your camera at the QR code on the organisers' screen");
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return scanMsg('The camera only works on a secure (https://) link.', 'bad');
+  try {
+    scan.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (err) {
+    return scanMsg(err.name === 'NotAllowedError' ? 'Camera is blocked. Allow it in your browser settings, then try again.' : "Couldn't start the camera: " + (err.message || err.name), 'bad');
+  }
+  if ($('#scan').classList.contains('hidden')) return stopScanner(); // closed while waiting
+  const v = $('#scanView');
+  v.srcObject = scan.stream;
+  await v.play().catch(() => {});
+  // Built-in detector where the phone has one (Android Chrome); jsQR everywhere else (iPhone).
+  try {
+    if (!scan.detector && 'BarcodeDetector' in window && (await BarcodeDetector.getSupportedFormats()).includes('qr_code')) scan.detector = new BarcodeDetector({ formats: ['qr_code'] });
+  } catch {}
+  if (!scan.detector) { try { await loadJsQR(); } catch (e) { return scanMsg(e.message, 'bad'); } }
+  scan.paused = false;
+  clearInterval(scan.timer);
+  scan.timer = setInterval(scanFrame, 200);
+}
+const scanCanvas = document.createElement('canvas');
+async function scanFrame() {
+  const v = $('#scanView');
+  if (scan.busy || scan.paused || !v.videoWidth) return;
+  scan.busy = true;
+  try {
+    let data = null;
+    if (scan.detector) data = (await scan.detector.detect(v))[0]?.rawValue || null;
+    else {
+      const k = Math.min(1, 720 / Math.max(v.videoWidth, v.videoHeight));
+      const w = scanCanvas.width = Math.round(v.videoWidth * k), h = scanCanvas.height = Math.round(v.videoHeight * k);
+      const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(v, 0, 0, w, h);
+      data = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' })?.data || null;
+    }
+    if (data) await submitCheckin(data);
+  } catch {} finally { scan.busy = false; }
+}
+async function submitCheckin(code) {
+  if (!code.startsWith('MMCHK-')) return scanMsg("That's a different QR code. Scan the one on the organisers' screen.", 'bad');
+  scan.paused = true;
+  scanMsg('Checking you in…', 'ok');
+  try {
+    const r = await api('/api/checkin', { method: 'POST', body: JSON.stringify({ code }) });
+    state.checkin = r.checkin;
+    closeScanner();
+    navigator.vibrate?.([40, 60, 40]);
+    renderCheckinBar();
+    toast(`Team checked in at ${fmtClock(r.checkin.arrivedAt)}`, 'No one else on your team needs to scan.');
+    load();
+  } catch (e) {
+    scanMsg(e.message, 'bad');
+    setTimeout(() => { scan.paused = false; }, 1500); // keep scanning
+  }
+}
+function stopScanner() {
+  clearInterval(scan.timer); scan.timer = null;
+  scan.stream?.getTracks().forEach(t => t.stop());
+  scan.stream = null;
+}
+function closeScanner() {
+  stopScanner();
+  $('#scan').classList.add('hidden');
+  document.body.style.overflow = openTaskId ? 'hidden' : '';
+}
+$('#scanClose').onclick = closeScanner;
 
 // ---------- Onboarding task: a selfie, shown like any other task ----------
 // The dashed slot opens the same full-screen camera players use for tasks (front camera, photo only).

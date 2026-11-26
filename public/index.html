@@ -146,6 +146,32 @@
     .pr-hero .hl { background: var(--lime); border-radius: var(--pill); padding: 0 .2em; }
     .pr-hero p { margin: 10px 0 0; }
     .pr-list { padding: 6px 16px; }
+    /* End-of-day check-in */
+    .ci-bar { border-bottom: 2px solid var(--ink); animation: ci-in .3s ease; }
+    @keyframes ci-in { from { opacity: 0; } }
+    .ci-bar .ci-in { display: flex; align-items: center; gap: 14px; padding: 16px; }
+    .ci-bar.todo { background: var(--blue); color: var(--white); }
+    .ci-bar.todo.late { background: var(--coral); color: var(--ink); }
+    .ci-bar.done { background: var(--ok-bg); color: var(--ok-fg); }
+    .ci-ic { width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.18); }
+    .ci-bar.done .ci-ic { background: var(--white); }
+    .ci-bar.todo .ci-ic { animation: ci-pulse 1.6s ease-in-out infinite; }
+    @keyframes ci-pulse { 50% { box-shadow: 0 0 0 6px rgba(255,255,255,.2); } }
+    .ci-ic .i { width: 22px; height: 22px; }
+    .ci-txt { flex: 1; min-width: 0; display: grid; gap: 1px; line-height: 1.25; }
+    .ci-txt b { font-size: 18px; }
+    .ci-txt span { font-size: 14px; font-weight: 600; opacity: .9; }
+    header.top:has(.ci-bar:not(.hidden)) { padding-top: 0; }
+    .ci-bar .ci-in { padding-top: calc(16px + var(--safe-t)); }
+    .ci-btn { flex: none; background: var(--yellow); color: var(--ink); border: 2px solid var(--ink); box-shadow: none; font-size: 15px; padding: 12px 18px; }
+    .scan { position: fixed; inset: 0; z-index: 60; background: #000; color: #fff; }
+    .scan video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .scan .cam-top { position: absolute; top: 0; left: 0; right: 0; }
+    .scan-title { font-weight: 800; font-size: 17px; }
+    .scan-frame { position: absolute; left: 50%; top: 45%; width: min(70vw, 300px); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 24px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); outline: 3px solid var(--yellow); outline-offset: -3px; }
+    .scan-msg { position: absolute; left: 16px; right: 16px; bottom: calc(40px + var(--safe-b)); text-align: center; font-weight: 700; font-size: 15px; padding: 12px 16px; border-radius: 14px; background: rgba(0,0,0,.6); }
+    .scan-msg.bad { background: var(--bad-bg); color: var(--bad-fg); }
+    .scan-msg.ok { background: var(--ok-bg); color: var(--ok-fg); }
     /* Onboarding */
     .ob-step { display: inline-block; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; background: var(--ink); color: var(--white); border-radius: var(--pill); padding: 4px 10px; margin-bottom: 10px; }
     .ob-top { display: flex; justify-content: space-between; align-items: center; }
@@ -301,6 +327,7 @@
   <!-- APP -->
   <section id="app" class="hidden">
     <header class="top">
+      <div id="checkinBar" class="ci-bar hidden" role="status"></div>
       <div class="wrap">
         <div class="row">
           <img class="wordmark" src="/img/theme/wordmark.png" width="1040" height="374" alt="Mumbai Maxxing">
@@ -337,6 +364,14 @@
       </div>
     </nav>
   </section>
+
+  <!-- End-of-day check-in scanner: reads the QR code on the organisers' screen. -->
+  <div id="scan" class="scan hidden" role="dialog" aria-modal="true" aria-label="Scan check-in code">
+    <video id="scanView" autoplay playsinline muted></video>
+    <div class="scan-frame" aria-hidden="true"></div>
+    <div class="cam-top"><button class="cam-ic" id="scanClose" aria-label="Close scanner"><span data-icon="x"></span></button><span class="scan-title">Check in</span><span style="width:44px"></span></div>
+    <div id="scanMsg" class="scan-msg"></div>
+  </div>
 
   <!-- In-app camera: live viewfinder via getUserMedia. Gallery picks are only offered on tasks that allow them. -->
   <div id="cam" class="cam hidden" role="dialog" aria-modal="true" aria-label="Camera">

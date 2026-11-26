@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const { db, UPLOAD_DIR, MAX_MEMBERS, uniqueCode, getSetting, setSetting } = require('./db');
+const QRCode = require('qrcode');
 const drive = require('./drive');
 
 const PORT = process.env.PORT || 3000;
@@ -116,8 +117,83 @@ const scoreSql = `
     (SELECT MAX(s.reviewed_at) FROM submissions s WHERE s.team_id = t.id AND s.status = 'approved') AS last_approved
   FROM teams t`;
 function leaderboard() {
-  return db.prepare(`${scoreSql} ORDER BY points DESC, last_approved ASC, t.id ASC`).all()
+  return withPenalties(db.prepare(`${scoreSql} ORDER BY t.id`).all())
+    .sort((a, b) => b.points - a.points || (a.last_approved ?? Infinity) - (b.last_approved ?? Infinity) || a.id - b.id)
     .map(({ code, ...r }) => r);
+}
+
+// ---------- End-of-day check-in ----------
+// Organisers show a QR code at the venue that changes every 5 seconds. Each member scans it in the app.
+// A team has arrived as soon as any one member scans; each started minute after the deadline costs points.
+const CHECKIN_SLOT_MS = 5000;
+const CHECKIN_GRACE_SLOTS = 2; // the previous two codes still work (a scan right at the change, slow networks)
+function checkinSecret() {
+  let s = getSetting('checkinSecret', null);
+  if (!s) { s = crypto.randomBytes(32).toString('hex'); setSetting('checkinSecret', s); }
+  return s;
+}
+const checkinSig = slot => crypto.createHmac('sha256', checkinSecret()).update('checkin:' + slot).digest('hex').slice(0, 12);
+const checkinCode = slot => `MMCHK-${slot}-${checkinSig(slot)}`;
+function checkinCodeValid(code) {
+  const m = /^MMCHK-(\d+)-([0-9a-f]{12})$/.exec(String(code || '').trim());
+  if (!m) return 'wrong';
+  const slot = +m[1], cur = Math.floor(Date.now() / CHECKIN_SLOT_MS);
+  const a = Buffer.from(m[2]), b = Buffer.from(checkinSig(slot));
+  if (!crypto.timingSafeEqual(a, b)) return 'wrong';
+  return slot <= cur && slot >= cur - CHECKIN_GRACE_SLOTS ? 'ok' : 'expired';
+}
+// Default deadline: 5:00 pm IST today.
+function defaultDeadline() {
+  const ist = new Date(Date.now() + 330 * 60000);
+  return Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), 17, 0) - 330 * 60000;
+}
+function checkinConfig() {
+  return {
+    open: getSetting('checkinOpen', false),
+    deadline: getSetting('checkinDeadline', null) ?? defaultDeadline(),
+    perMinute: getSetting('checkinPenalty', 5),
+    openedAt: getSetting('checkinOpenedAt', null), // first time it was turned on; no penalties before that
+    closedAt: getSetting('checkinClosedAt', null), // when it was turned off; teams still out stop losing points
+  };
+}
+// Per team: who has checked in, when the team arrived, minutes late and the points lost.
+function checkinTeams(cfg = checkinConfig()) {
+  const members = db.prepare('SELECT id, team_id, name FROM members ORDER BY id').all();
+  const scans = new Map(db.prepare('SELECT * FROM checkins').all().map(c => [c.member_id, c]));
+  const out = new Map();
+  for (const m of members) {
+    const t = out.get(m.team_id) || { members: [], total: 0, done: 0 };
+    const c = scans.get(m.id);
+    t.members.push({ id: m.id, name: m.name, at: c?.at ?? null, method: c?.method ?? null, markedBy: c?.marked_by ?? '' });
+    t.total++; if (c) t.done++;
+    out.set(m.team_id, t);
+  }
+  const now = Date.now();
+  for (const t of out.values()) {
+    const first = t.members.filter(m => m.at).sort((a, b) => a.at - b.at)[0];
+    t.arrivedAt = first?.at ?? null;
+    t.arrivedBy = first?.name ?? null;
+    const until = t.arrivedAt ?? (cfg.closedAt ?? now);
+    t.lateMin = cfg.openedAt && t.total && until > cfg.deadline ? Math.ceil((until - cfg.deadline) / 60000) : 0;
+    t.penalty = t.lateMin * cfg.perMinute;
+    t.final = !!t.arrivedAt || !!cfg.closedAt; // still counting up while the team is out and check-in is open
+  }
+  return out;
+}
+// Subtract late penalties from team rows produced by scoreSql.
+function withPenalties(rows) {
+  const ct = checkinTeams();
+  return rows.map(r => { const p = ct.get(r.id)?.penalty || 0; return { ...r, task_points: r.points, penalty: p, points: r.points - p }; });
+}
+function checkinForTeam(teamId, memberId) {
+  const cfg = checkinConfig();
+  const t = checkinTeams(cfg).get(teamId) || { members: [], total: 0, done: 0, arrivedAt: null, lateMin: 0, penalty: 0 };
+  return {
+    open: cfg.open, deadline: cfg.deadline, perMinute: cfg.perMinute, started: !!cfg.openedAt,
+    meAt: memberId ? t.members.find(m => m.id === memberId)?.at ?? null : null,
+    done: t.done, total: t.total, arrivedAt: t.arrivedAt, arrivedBy: t.arrivedBy ?? null, lateMin: t.lateMin, penalty: t.penalty,
+    members: t.members.map(m => ({ id: m.id, at: m.at })),
+  };
 }
 function mediaFor(subIds) {
   if (!subIds.length) return {};
@@ -142,7 +218,7 @@ function memberOut(m) {
   };
 }
 function teamState(teamId) {
-  const team = db.prepare(`${scoreSql} WHERE t.id = ?`).get(teamId);
+  const team = withPenalties(db.prepare(`${scoreSql} WHERE t.id = ?`).all(teamId))[0];
   const members = db.prepare(`SELECT ${MEMBER_COLS} FROM members WHERE team_id = ? ORDER BY id`).all(teamId).map(memberOut);
   const tasks = db.prepare('SELECT id, title, description, points, min_photos, min_videos, needs_link, link_label, allow_gallery, opens_at, closes_at FROM tasks ORDER BY sort, id').all();
   const subs = db.prepare(`
@@ -183,7 +259,23 @@ app.post('/api/join', (req, res) => {
 });
 
 app.get('/api/me', teamAuth, (req, res) => {
-  res.json({ me: { id: req.member.id, name: req.member.name, selfie: req.member.selfie ? '/media/' + req.member.selfie : null }, serverNow: Date.now(), ...teamState(req.member.team_id) });
+  res.json({ me: { id: req.member.id, name: req.member.name, selfie: req.member.selfie ? '/media/' + req.member.selfie : null }, serverNow: Date.now(),
+    ...teamState(req.member.team_id), checkin: checkinForTeam(req.member.team_id, req.member.id) });
+});
+
+// Player scanned the venue QR code.
+app.post('/api/checkin', teamAuth, (req, res) => {
+  if (!getSetting('checkinOpen', false)) return res.status(403).json({ error: "Check-in isn't open right now." });
+  const v = checkinCodeValid(req.body.code);
+  if (v === 'wrong') return res.status(400).json({ error: "That's not the check-in code. Scan the QR on the organisers' screen." });
+  if (v === 'expired') return res.status(400).json({ error: 'That code just expired. Scan the screen again.' });
+  // One scan checks in the whole team; a teammate scanning later doesn't change the arrival time.
+  const already = db.prepare('SELECT 1 FROM checkins WHERE team_id = ?').get(req.member.team_id);
+  if (!already) db.prepare('INSERT INTO checkins (member_id, team_id, at, method) VALUES (?, ?, ?, ?)').run(req.member.id, req.member.team_id, Date.now(), 'qr');
+  toTeam(req.member.team_id, 'refresh', {});
+  toAdmins('checkin', { teamId: req.member.team_id });
+  if (getSetting('showLeaderboard', false)) toAllTeams('leaderboard', {});
+  res.json({ ok: true, checkin: checkinForTeam(req.member.team_id, req.member.id) });
 });
 
 app.get('/api/leaderboard', teamAuth, (req, res) => {
@@ -480,7 +572,7 @@ app.post('/api/admin/submissions/:id/review', adminAuth, (req, res) => {
 
 app.get('/api/admin/teams', adminAuth, (req, res) => {
   const sc = teamScope(req, 't.id');
-  const teams = db.prepare(`${scoreSql} WHERE ${sc.sql} ORDER BY t.id`).all(...sc.args);
+  const teams = withPenalties(db.prepare(`${scoreSql} WHERE ${sc.sql} ORDER BY t.id`).all(...sc.args));
   const members = db.prepare(`SELECT ${MEMBER_COLS} FROM members ORDER BY id`).all().map(memberOut);
   const reviewers = req.admin.super ? db.prepare('SELECT at.team_id, a.name FROM admin_teams at JOIN admins a ON a.id = at.admin_id ORDER BY a.name').all() : [];
   teams.forEach(t => {
@@ -655,6 +747,63 @@ app.delete('/api/admin/tasks/:id', adminAuth, superOnly, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Check-in (super admin) ----------
+app.get('/api/admin/checkin', adminAuth, superOnly, (req, res) => {
+  const cfg = checkinConfig();
+  const ct = checkinTeams(cfg);
+  const teams = db.prepare('SELECT id, name FROM teams ORDER BY id').all()
+    .map(t => ({ ...t, ...(ct.get(t.id) || { members: [], total: 0, done: 0, arrivedAt: null, lateMin: 0, penalty: 0, final: false }) }));
+  res.json({ ...cfg, serverNow: Date.now(), teams });
+});
+app.post('/api/admin/checkin/settings', adminAuth, superOnly, (req, res) => {
+  const b = req.body;
+  if (typeof b.open === 'boolean' && b.open !== getSetting('checkinOpen', false)) {
+    setSetting('checkinOpen', b.open);
+    if (b.open) { if (!getSetting('checkinOpenedAt', null)) setSetting('checkinOpenedAt', Date.now()); setSetting('checkinClosedAt', null); }
+    else setSetting('checkinClosedAt', Date.now());
+  }
+  if (b.deadline !== undefined) {
+    const d = Number(b.deadline);
+    if (!Number.isFinite(d) || d < 1.5e12 || d > 4e12) return res.status(400).json({ error: 'Invalid deadline' });
+    setSetting('checkinDeadline', d);
+  }
+  if (b.perMinute !== undefined) {
+    const p = Math.round(Number(b.perMinute));
+    if (!Number.isFinite(p) || p < 0 || p > 1000) return res.status(400).json({ error: 'Points per minute must be 0–1000.' });
+    setSetting('checkinPenalty', p);
+  }
+  toAllTeams('refresh', {});
+  toAdmins('checkin', {});
+  res.json({ ok: true, ...checkinConfig() });
+});
+// The code for the venue screen. The page asks again when it expires.
+app.get('/api/admin/checkin/qr', adminAuth, superOnly, async (req, res) => {
+  const now = Date.now(), slot = Math.floor(now / CHECKIN_SLOT_MS);
+  const svg = await QRCode.toString(checkinCode(slot), { type: 'svg', margin: 0, errorCorrectionLevel: 'M', color: { dark: '#111111', light: '#ffffff' } });
+  res.json({ svg, serverNow: now, expiresAt: (slot + 1) * CHECKIN_SLOT_MS, open: getSetting('checkinOpen', false) });
+});
+// Organiser marks a member in (dead phone etc.) or undoes a check-in.
+app.post('/api/admin/checkin/members/:id', adminAuth, superOnly, (req, res) => {
+  const m = db.prepare('SELECT id, team_id FROM members WHERE id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Member not found' });
+  if (req.body.checkedIn) {
+    const at = Number(req.body.at) > 1.5e12 ? Number(req.body.at) : Date.now();
+    db.prepare("INSERT INTO checkins (member_id, team_id, at, method, marked_by) VALUES (?, ?, ?, 'admin', ?) ON CONFLICT(member_id) DO UPDATE SET at = excluded.at, method = 'admin', marked_by = excluded.marked_by")
+      .run(m.id, m.team_id, at, req.admin.name);
+  } else db.prepare('DELETE FROM checkins WHERE member_id = ?').run(m.id);
+  toTeam(m.team_id, 'refresh', {});
+  toAdmins('checkin', { teamId: m.team_id });
+  res.json({ ok: true });
+});
+app.post('/api/admin/checkin/reset', adminAuth, superOnly, (req, res) => {
+  db.prepare('DELETE FROM checkins').run();
+  for (const k of ['checkinOpenedAt', 'checkinClosedAt']) setSetting(k, null);
+  setSetting('checkinOpen', false);
+  toAllTeams('refresh', {});
+  toAdmins('checkin', {});
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/settings', adminAuth, superOnly, (req, res) => {
   for (const k of ['showLeaderboard', 'submissionsOpen']) if (typeof req.body[k] === 'boolean') setSetting(k, req.body[k]);
   toAllTeams('refresh', {});
@@ -706,6 +855,7 @@ app.get('/media/:file', async (req, res) => {
   try { await drive.stream(m.drive_id, req, res); }
   catch (err) { console.error('Drive stream failed:', err.message); if (!res.headersSent) res.status(502).send('Could not load from Google Drive'); }
 });
+app.get('/vendor/jsQR.js', (req, res) => res.sendFile(require.resolve('jsqr/dist/jsQR.js'), { maxAge: '30d' }));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, p) => { if (/\.(html|js|webmanifest)$/.test(p)) res.setHeader('Cache-Control', 'no-cache'); },

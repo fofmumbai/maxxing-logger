@@ -307,7 +307,10 @@ body.admin .danger-ghost:hover { background: var(--bad-bg); }
 body.admin .lbrow .name { display: grid; gap: 2px; min-width: 0; }
 body.admin .lbrow .lbstat { font-size: 13px; font-weight: 400; color: var(--muted); }
 
-/* Admin tab bar fits a small phone without cutting off the last tab. */
-@media (max-width: 420px) {
-  body.admin .tabs a { padding: 8px 6px; font-size: 12.5px; }
+/* Admin tab bar on phones: seven tabs don't fit, so it scrolls sideways with a fade
+   hinting at more, and the active tab is scrolled into view (admin.js render). */
+@media (max-width: 700px) {
+  body.admin .tabs { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); scroll-padding: 0 28px; }
+  body.admin .tabs.at-end { -webkit-mask-image: none; mask-image: none; }
+  body.admin .tabs a { padding: 8px 10px; font-size: 13px; }
 }

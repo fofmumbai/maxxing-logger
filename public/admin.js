@@ -92,17 +92,26 @@ function parseRoute() {
   const h = location.hash.replace(/^#\/?/, '');
   const [name, id] = h.split('/');
   if (name === 'team' && id) return { name: 'team', id: +id };
-  const allowed = isSuper() ? ['teams', 'queue', 'board', 'tasks', 'admins', 'settings'] : ['teams', 'queue', 'board', 'settings'];
+  const allowed = isSuper() ? ['teams', 'queue', 'board', 'tasks', 'checkin', 'qr', 'admins', 'settings'] : ['teams', 'queue', 'board', 'settings'];
   return { name: allowed.includes(name) ? name : 'teams' };
 }
 window.addEventListener('hashchange', () => { if (!token) return; route = parseRoute(); window.scrollTo(0, 0); render(); });
 function render() {
-  const tab = route.name === 'team' ? 'teams' : route.name;
+  stopQr();
+  document.body.classList.toggle('qr-mode', route.name === 'qr');
+  const tab = route.name === 'team' ? 'teams' : route.name === 'qr' ? 'checkin' : route.name;
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
-  ({ teams: viewTeams, team: () => viewTeam(route.id), queue: viewQueue, board: viewBoard, tasks: viewTasks, admins: viewAdmins, settings: viewSettings })[route.name]()
+  $('.tabs a.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  tabsFade();
+  ({ teams: viewTeams, team: () => viewTeam(route.id), queue: viewQueue, board: viewBoard, tasks: viewTasks, checkin: viewCheckin, qr: viewQr, admins: viewAdmins, settings: viewSettings })[route.name]()
     .catch(err => err.message !== 'Logged out' && paint(`<div class="empty">${esc(err.message)}</div>`));
   loadSummary().catch(() => {}); // the badge is best-effort; a 401 already logs out inside api()
 }
+
+// Drop the edge fade once the tab bar is scrolled to its end.
+function tabsFade() { const t = $('.tabs'); t.classList.toggle('at-end', t.scrollLeft + t.clientWidth >= t.scrollWidth - 4); }
+$('.tabs').addEventListener('scroll', tabsFade, { passive: true });
+window.addEventListener('resize', tabsFade);
 
 async function loadSummary() {
   const s = await api('/api/admin/summary');
@@ -229,6 +238,7 @@ async function viewTeams() {
       <button class="btn sm" id="printCodes">Print room codes</button>` : ''}
     </div>
     ${!isSuper() && !sorted.length ? '<div class="empty">No teams are assigned to you yet. Ask the super admin to assign your teams.</div>' : ''}
+    ${isSuper() ? await checkinQuickCard() : ''}
     <div class="teamgrid">${sorted.map(t => `
       <a class="card tcard ${t.pending ? 'has-pending' : ''}" href="#/team/${t.id}">
         ${t.pending ? `<span class="review-tag">${t.pending} to review</span>` : ''}
@@ -254,6 +264,7 @@ async function viewTeams() {
     if (await confirmDeleteTeam(+b.dataset.delTeam)) viewTeams();
   });
   if (!isSuper()) return;
+  bindCheckinToggle();
   $('#addTeam').onclick = async () => {
     const name = prompt('Team name', '');
     if (name === null) return;
@@ -710,6 +721,154 @@ function driveCard(d) {
     </div>${head(ok ? 'Connected' : 'Problem', ok ? 'st-approved' : 'st-rejected')}</div>`;
 }
 
+// ---------- End-of-day check-in ----------
+// The super admin turns check-in on; players get a banner and scan the QR on the venue screen (#/qr).
+// A team is in as soon as any one member scans; each started minute after the deadline costs points.
+const istParts = ms => { const d = new Date(ms + 330 * 60000); return { y: d.getUTCFullYear(), m: d.getUTCMonth(), d: d.getUTCDate(), hh: d.getUTCHours(), mm: d.getUTCMinutes() }; };
+const pad2 = n => String(n).padStart(2, '0');
+const fmtSecs = ms => new Date(ms).toLocaleTimeString('en-IN', { ...IST, hour: 'numeric', minute: '2-digit', second: '2-digit' });
+
+async function setCheckin(body) {
+  try { await api('/api/admin/checkin/settings', { method: 'POST', body: JSON.stringify(body) }); return true; }
+  catch (err) { toast('Error', err.message, 'rejected'); return false; }
+}
+async function checkinQuickCard() {
+  const d = await api('/api/admin/checkin');
+  const withMembers = d.teams.filter(t => t.total);
+  const inCount = withMembers.filter(t => t.arrivedAt).length;
+  return `<div class="card setting ci-quick">
+    <span class="ci-qic">${icon('pin')}</span>
+    <div><b>End-of-day check-in</b><div class="muted small">${d.open ? `Open · ${inCount}/${withMembers.length} teams in` : `Off · deadline ${fmtTime(d.deadline)} IST`}</div></div>
+    <a class="btn ghost sm" href="#/checkin">Manage</a>
+    <label class="switch" title="Check-in open"><input type="checkbox" id="ciOpen" ${d.open ? 'checked' : ''}><span></span></label>
+  </div>`;
+}
+function bindCheckinToggle() {
+  const sw = $('#ciOpen');
+  if (!sw) return;
+  sw.onchange = async e => {
+    const on = e.target.checked;
+    if (await setCheckin({ open: on })) { toast(on ? 'Check-in is open' : 'Check-in closed', on ? 'Players now see the scan banner.' : 'Teams still out stop losing points.'); render(); }
+    else e.target.checked = !on;
+  };
+}
+
+async function viewCheckin() {
+  const d = await api('/api/admin/checkin');
+  const withMembers = d.teams.filter(t => t.total);
+  const inCount = withMembers.filter(t => t.arrivedAt).length;
+  const dl = istParts(d.deadline);
+  // Teams still out first (most members missing first), then arrived teams by arrival time.
+  const empty = d.teams.filter(t => !t.total);
+  const teams = withMembers.sort((a, b) => (!!a.arrivedAt - !!b.arrivedAt) || (a.arrivedAt && b.arrivedAt ? a.arrivedAt - b.arrivedAt : 0) || a.id - b.id);
+  const status = t => !t.total ? '<span class="pill">No members</span>'
+    : t.arrivedAt ? (t.lateMin ? `<span class="pill st-rejected">In ${fmtTime(t.arrivedAt)} · ${t.lateMin} min late · −${t.penalty}</span>` : `<span class="pill st-approved">In ${fmtTime(t.arrivedAt)} · on time</span>`)
+      : `<span class="pill st-pending">Not in${t.penalty ? ` · −${t.penalty}${t.final ? '' : ' so far'}` : ''}</span>`;
+  paint(`
+    <div class="toolbar">
+      <h2>Check-in</h2>
+      <div class="stats"><span class="pill st-approved">${inCount}/${withMembers.length} teams in</span></div>
+      <a class="btn sm" href="#/qr">${icon('arrow-right')}Open QR screen</a>
+    </div>
+    <div class="ci-cards">
+      <label class="card setting"><div><b>Check-in open</b><div class="muted small">Players get a banner to scan the QR code shown at the venue. Turning it off stops the clock for teams still out.</div></div>
+        <span class="switch"><input type="checkbox" id="ciOpen" ${d.open ? 'checked' : ''}><span></span></span></label>
+      <div class="card setting ci-cfg">
+        <div class="field"><label for="ciDeadline">Deadline (IST)</label><input class="input" type="time" id="ciDeadline" value="${pad2(dl.hh)}:${pad2(dl.mm)}"></div>
+        <div class="field"><label for="ciPer">Points lost per minute late</label><input class="input" type="number" id="ciPer" min="0" max="1000" value="${d.perMinute}"></div>
+        <button class="btn sm" id="ciSave">Save</button>
+      </div>
+    </div>
+    <p class="muted small" style="margin:4px 0 14px">A team is in as soon as any one member scans. Tap <b>Mark in</b> on any member to check a team in by hand. Each started minute after ${fmtTime(d.deadline)} costs ${d.perMinute} points, taken off the team's score automatically.</p>
+    <div class="ci-list">${teams.map(t => `
+      <div class="card ci-team ${t.arrivedAt ? 'in' : ''}">
+        <div class="ci-head"><a href="#/team/${t.id}"><b>${esc(t.name)}</b></a>${status(t)}</div>
+        <div>${t.members.map(m => `<span class="mchip ${m.at ? 'ci-in' : ''}">${m.at ? icon('check') : ''}${esc(m.name)}
+          <span class="muted small">${m.at ? fmtSecs(m.at) + (m.method === 'admin' ? ' · marked' : '') : 'not in'}</span>
+          <button class="kick" data-ci-mark="${m.id}" data-in="${m.at ? 1 : 0}">${m.at ? 'Undo' : 'Mark in'}</button></span>`).join('') || '<span class="muted small">No one has joined this team.</span>'}</div>
+      </div>`).join('') || '<div class="empty">No one has joined a team yet.</div>'}</div>
+    ${empty.length ? `<p class="muted small" style="margin:12px 0 0">${empty.length} team${empty.length === 1 ? ' has' : 's have'} no members, so ${empty.length === 1 ? "it isn't" : "they aren't"} counted: ${empty.map(t => esc(t.name)).join(', ')}.</p>` : ''}
+    <button class="btn sm danger-ghost" id="ciReset" style="margin-top:18px">${ICON_TRASH}Reset all check-ins</button>`);
+  bindCheckinToggle();
+  $('#ciSave').onclick = async () => {
+    const [hh, mm] = $('#ciDeadline').value.split(':').map(Number);
+    if (!Number.isFinite(hh)) return toast('Pick a deadline time', '', 'rejected');
+    const today = istParts(Date.now());
+    const deadline = Date.UTC(today.y, today.m, today.d, hh, mm) - 330 * 60000;
+    if (await setCheckin({ deadline, perMinute: +$('#ciPer').value })) { toast('Saved'); render(); }
+  };
+  $$('[data-ci-mark]').forEach(b => b.onclick = async () => {
+    const markIn = b.dataset.in === '0';
+    if (!markIn && !await choose('Undo this check-in?', 'They will need to scan again, and their team counts as not in until they do.', [{ label: 'Undo check-in', value: true, kind: 'danger' }])) return;
+    try { await api('/api/admin/checkin/members/' + b.dataset.ciMark, { method: 'POST', body: JSON.stringify({ checkedIn: markIn }) }); render(); }
+    catch (err) { toast('Error', err.message, 'rejected'); }
+  });
+  $('#ciReset').onclick = async () => {
+    if (!await choose('Reset all check-ins?', 'Clears every scan and late penalty and turns check-in off. Use this after a practice run.', [{ label: 'Reset', value: true, kind: 'danger' }])) return;
+    await api('/api/admin/checkin/reset', { method: 'POST' }); toast('Check-ins reset'); render();
+  };
+  clearInterval(ciTick);
+  if (d.open) ciTick = setInterval(() => route.name === 'checkin' && !document.querySelector('.dlg-scrim') && document.activeElement?.tagName !== 'INPUT' && render(), 20000); // penalties grow while teams are out
+}
+let ciTick = null;
+
+// Full-screen page for the venue screen: a QR code that changes every 5 seconds.
+const qr = { timer: null, clock: null, stats: null, off: 0, deadline: 0 };
+function stopQr() { clearTimeout(qr.timer); clearInterval(qr.clock); clearInterval(qr.stats); clearInterval(ciTick); }
+async function viewQr() {
+  paint(`<div class="qr-page">
+    <a class="qr-exit" href="#/checkin">${icon('arrow-left')}Exit</a>
+    <div class="qr-main">
+      <div class="qr-box"><div id="qrSvg" class="qr-svg"></div><div class="qr-closed hidden" id="qrClosed"><b>Check-in is closed</b><span>Turn it on from the Check-in page.</span></div><div class="qr-timer"><i id="qrBar"></i></div></div>
+      <div class="qr-side">
+        <h1>Scan to <span class="sticker pink">check in</span></h1>
+        <p>Open Mumbai Maxxing and tap <b>Scan QR</b> in the blue banner. One scan per team is enough.</p>
+        <div class="qr-clock" id="qrClock"></div>
+        <div class="qr-dl" id="qrDl"></div>
+        <div class="qr-count" id="qrCount"></div>
+      </div>
+    </div></div>`);
+  await refreshQrStats();
+  const tickClock = () => {
+    const n = Date.now() + qr.off;
+    $('#qrClock').textContent = fmtSecs(n);
+    const late = Math.ceil((n - qr.deadline) / 60000);
+    $('#qrDl').className = 'qr-dl' + (n > qr.deadline ? ' late' : '');
+    $('#qrDl').textContent = n > qr.deadline ? `Deadline ${fmtTime(qr.deadline)} · ${late} min late` : `Deadline ${fmtTime(qr.deadline)}`;
+  };
+  tickClock();
+  qr.clock = setInterval(tickClock, 250);
+  qr.stats = setInterval(refreshQrStats, 15000);
+  loadQrCode();
+}
+async function loadQrCode() {
+  if (route.name !== 'qr') return;
+  try {
+    const r = await api('/api/admin/checkin/qr');
+    qr.off = r.serverNow - Date.now();
+    $('#qrSvg').innerHTML = r.svg;
+    $('#qrSvg').classList.toggle('hidden', !r.open);
+    $('#qrClosed').classList.toggle('hidden', r.open);
+    // Shrink the bar over the code's remaining life, then fetch the next one.
+    const left = Math.max(200, r.expiresAt - r.serverNow);
+    const bar = $('#qrBar');
+    bar.style.transition = 'none'; bar.style.width = (left / 5000 * 100) + '%';
+    requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transition = `width ${left}ms linear`; bar.style.width = '0%'; }));
+    qr.timer = setTimeout(loadQrCode, left + 30);
+  } catch { qr.timer = setTimeout(loadQrCode, 1000); }
+}
+async function refreshQrStats() {
+  if (route.name !== 'qr') return;
+  try {
+    const d = await api('/api/admin/checkin');
+    qr.deadline = d.deadline;
+    const withMembers = d.teams.filter(t => t.total);
+    const inCount = withMembers.filter(t => t.arrivedAt).length;
+    $('#qrCount').innerHTML = `<b>${inCount}/${withMembers.length}</b> teams in`;
+    if (!d.open) { $('#qrSvg').classList.add('hidden'); $('#qrClosed').classList.remove('hidden'); }
+  } catch {}
+}
+
 async function viewSettings() {
   if (!isSuper()) {
     paint(`
@@ -874,6 +1033,10 @@ function connect() {
   });
   es.addEventListener('signout', () => { logout(); $('#loginErr').textContent = 'You were signed out. Log in again with your new password.'; });
   es.addEventListener('drive', () => route.name === 'settings' && render());
+  es.addEventListener('checkin', () => {
+    if (route.name === 'checkin' || route.name === 'teams') render();
+    else if (route.name === 'qr') refreshQrStats();
+  });
 }
 
 // Result of the Google Drive connect redirect (/admin?drive=connected#/settings).

@@ -91,6 +91,41 @@
     .mchip { padding-right: 4px; }
     .mchip .kick { border: 0; background: var(--white); cursor: pointer; color: var(--maroon); font-size: 12px; font-weight: 700; border-radius: var(--pill); padding: 4px 10px; margin-left: 4px; }
     .mchip .kick:hover { background: #FFE0E0; }
+    /* Check-in */
+    .ci-quick { margin-bottom: 16px; }
+    .ci-quick .ci-qic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--blue); color: var(--white); flex: none; }
+    .ci-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+    .ci-cfg { flex-wrap: wrap; align-items: flex-end; }
+    .ci-cfg .field { flex: 1; min-width: 140px; display: grid; gap: 6px; }
+    .ci-cfg label { font-size: 13px; font-weight: 700; }
+    .ci-list { display: grid; gap: 10px; }
+    .ci-team { padding: 14px 16px; display: grid; gap: 8px; }
+    .ci-team.in { background: var(--ok-bg); }
+    .ci-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .ci-head a { color: inherit; }
+    .mchip.ci-in { background: var(--white); }
+    .mchip.ci-in > .i { color: var(--ok-fg); }
+    .mchip .muted.small { font-size: 12px; }
+    /* Venue QR screen */
+    body.qr-mode header.top { display: none; }
+    body.qr-mode main.wrap { max-width: none; padding: 0; }
+    .qr-page { min-height: 100dvh; display: grid; align-content: center; padding: 32px 24px; position: relative; }
+    .qr-exit { position: absolute; top: 16px; left: 16px; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--muted); text-decoration: none; }
+    .qr-main { display: flex; align-items: center; justify-content: center; gap: clamp(24px, 5vw, 72px); flex-wrap: wrap; }
+    .qr-box { background: #fff; border: 3px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); border-radius: 28px; padding: clamp(16px, 2.5vw, 28px); display: grid; gap: 16px; width: min(78vh, 90vw); }
+    .qr-svg svg { display: block; width: 100%; height: auto; }
+    .qr-closed { aspect-ratio: 1; display: grid; place-content: center; gap: 8px; text-align: center; }
+    .qr-closed b { font-size: 28px; }
+    .qr-timer { height: 10px; border-radius: 5px; background: var(--paper); overflow: hidden; }
+    .qr-timer i { display: block; height: 100%; width: 100%; background: var(--blue); border-radius: 5px; }
+    .qr-side { display: grid; gap: 14px; max-width: 420px; }
+    .qr-side h1 { font-size: clamp(36px, 5vw, 60px); line-height: 1.05; }
+    .qr-side p { font-size: 18px; margin: 0; }
+    .qr-clock { font-size: clamp(40px, 6vw, 72px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .qr-dl { font-size: 20px; font-weight: 700; justify-self: start; padding: 6px 14px; border-radius: var(--pill); background: var(--ok-bg); color: var(--ok-fg); }
+    .qr-dl.late { background: var(--bad-bg); color: var(--bad-fg); }
+    .qr-count { font-size: 20px; }
+    .qr-count b { font-size: 32px; }
     .media .del-file { position: absolute; top: 6px; right: 6px; z-index: 2; width: 30px; height: 30px; border-radius: 50%; border: 0; background: rgba(0,0,0,.65); color: #fff; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s; }
     .media .del-file svg { width: 16px; height: 16px; }
     .media .m:hover .del-file, .media .del-file:focus-visible { opacity: 1; }
@@ -284,6 +319,7 @@
           <a href="#/queue" data-tab="queue">Review<span class="long"> queue</span><span class="badge" id="pendingBadge"></span></a>
           <a href="#/board" data-tab="board"><span class="long">Leaderboard</span><span class="short">Board</span></a>
           <a href="#/tasks" data-tab="tasks" data-super>Tasks</a>
+          <a href="#/checkin" data-tab="checkin" data-super>Check-in</a>
           <a href="#/admins" data-tab="admins" data-super>Admins</a>
           <a href="#/settings" data-tab="settings">Settings</a>
         </nav>

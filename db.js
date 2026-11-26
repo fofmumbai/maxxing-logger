@@ -105,6 +105,17 @@ for (const table of ['uploads', 'media']) {
   }
 }
 
+// End-of-day check-in: one row per member who scanned the venue QR code (or was marked in by an organiser).
+db.exec(`
+CREATE TABLE IF NOT EXISTS checkins (
+  member_id INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  method TEXT NOT NULL DEFAULT 'qr',
+  marked_by TEXT NOT NULL DEFAULT ''
+);
+`);
+
 // Reviewer accounts created by the super admin, and the teams each one reviews.
 db.exec(`
 CREATE TABLE IF NOT EXISTS admins (
