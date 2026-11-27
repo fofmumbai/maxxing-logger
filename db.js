@@ -180,8 +180,10 @@ if (db.prepare('SELECT COUNT(*) n FROM teams').get().n === 0) {
   })();
 }
 if (db.prepare('SELECT COUNT(*) n FROM tasks').get().n === 0) {
-  const ins = db.prepare('INSERT INTO tasks (title, description, points, sort, min_photos) VALUES (?, ?, ?, ?, 1)');
-  db.transaction(() => seedTasks.forEach(([t, d, p], i) => ins.run(t, d, p, i + 1)))();
+  const ins = db.prepare(`INSERT INTO tasks (title, description, points, sort, min_photos, min_videos, needs_link, link_label, allow_gallery)
+    VALUES (@title, @description, @points, @sort, @min_photos, @min_videos, @needs_link, @link_label, @allow_gallery)`);
+  const defaults = { description: '', min_photos: 0, min_videos: 0, needs_link: 0, link_label: '', allow_gallery: 0 };
+  db.transaction(() => seedTasks.forEach((t, i) => ins.run({ ...defaults, ...t, sort: i + 1 })))();
 }
 
 // One-time: tasks saved with 0 photos, 0 videos and no link used to mean "at least 1 photo or video".
