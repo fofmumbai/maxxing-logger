@@ -41,6 +41,8 @@ const AVATAR_COLORS = ['var(--lime)', 'var(--coral)', 'var(--green)', '#C9C8FF']
 let token = store.get('mm_token');
 let state = null;
 let filter = 'all';
+let taskQuery = '';
+const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 // Task order: 'num' (task number) or 'points' (most points first). Remembered per phone.
 let taskSort = store.get('mm_task_sort') === 'points' ? 'points' : 'num';
 let tab = 'tasks';
@@ -180,7 +182,11 @@ function render() {
   $('#filterChips').classList.toggle('hidden', tab !== 'tasks');
   updateChipFade();
 
-  const list = statuses.filter(s => filter === 'all' || s.status === filter);
+  // Search matches the task name (accents ignored, so "cafe" finds "café") or its number ("12" / "#12").
+  const q = fold(taskQuery.trim());
+  const qNum = /^#?\d+$/.test(q) ? +q.replace('#', '') : 0;
+  const list = statuses.filter(s => (filter === 'all' || s.status === filter)
+    && (!q || fold(s.t.title).includes(q) || tasks.indexOf(s.t) + 1 === qNum));
   if (taskSort === 'points') list.sort((a, b) => b.t.points - a.t.points || tasks.indexOf(a.t) - tasks.indexOf(b.t));
   $('#taskList').innerHTML = list.length ? list.map(({ t, status }) => `
     <button class="task card ${status} ${(status === 'todo' || status === 'rejected') && ['upcoming', 'closed'].includes(taskWindow(t).state) ? 'w-' + taskWindow(t).state : ''}" data-task="${t.id}" aria-label="${esc(t.title)}, ${STATUS_LABEL[status]}, ${t.points} points">
@@ -191,7 +197,7 @@ function render() {
         ${schedLine(t, status)}
       </div>
       <span class="pill pts">+${t.points}</span>
-    </button>`).join('') : `<div class="empty">${filter === 'all' ? 'No tasks yet.' : `No ${STATUS_LABEL[filter].toLowerCase()} tasks.`}</div>`;
+    </button>`).join('') : `<div class="empty">${q ? `No ${filter === 'all' ? '' : STATUS_LABEL[filter].toLowerCase() + ' '}tasks match “${esc(taskQuery.trim())}”.` : filter === 'all' ? 'No tasks yet.' : `No ${STATUS_LABEL[filter].toLowerCase()} tasks.`}</div>`;
 
   renderUpdates();
   renderTeam();
@@ -1017,6 +1023,8 @@ document.addEventListener('click', e => {
   const nav = e.target.closest('nav.bottom [data-tab]');
   if (nav) setTab(nav.dataset.tab);
 });
+// The field sits outside #taskList, so re-rendering the list keeps focus and the keyboard open.
+document.getElementById('taskSearch').addEventListener('input', e => { taskQuery = e.target.value; render(); });
 
 // ---------- Realtime ----------
 function connect() {

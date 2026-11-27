@@ -364,9 +364,15 @@
     <main class="wrap">
       <div id="tab-tasks">
         <div id="subsNotice"></div>
-        <div class="sort-row" role="group" aria-label="Sort tasks">
-          <span>Sort by</span>
-          <div class="sort-seg"><button type="button" data-sort="num">Task #</button><button type="button" data-sort="points">Points</button></div>
+        <div class="sort-row">
+          <label class="task-search">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="taskSearch" placeholder="Search tasks" aria-label="Search tasks by name or number" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+          </label>
+          <div class="sort-ctl" role="group" aria-label="Sort tasks">
+            <span>Sort by</span>
+            <div class="sort-seg"><button type="button" data-sort="num">Task #</button><button type="button" data-sort="points">Points</button></div>
+          </div>
         </div>
         <div id="taskList" class="tasks"></div>
       </div>
